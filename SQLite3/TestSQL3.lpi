@@ -38,10 +38,13 @@
   <CompilerOptions>
     <Version Value="11"/>
     <PathDelim Value="\"/>
+    <Target>
+      <Filename Value="fpc\bin\$(TargetCPU)-$(TargetOS)\TestSQL3"/>
+    </Target>
     <SearchPaths>
       <IncludeFiles Value="..;$(ProjOutDir)"/>
       <OtherUnitFiles Value=".."/>
-      <UnitOutputDirectory Value="fpc\debug\$(TargetCPU)-$(TargetOS)"/>
+      <UnitOutputDirectory Value="fpc\lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>
       <SyntaxOptions>

@@ -3,7 +3,7 @@
   <ProjectSession>
     <PathDelim Value="\"/>
     <Version Value="9"/>
-    <BuildModes Count="4" Active="linux">
+    <BuildModes Count="4" Active="win32">
       <Item1 Name="void">
         <CompilerOptions>
           <Version Value="11"/>
@@ -17,10 +17,13 @@
       <Item2 Name="win32">
         <CompilerOptions>
           <Version Value="11"/>
+          <Target>
+            <Filename Value="fpc/bin/$(TargetCPU)-$(TargetOS)/TestSQL3"/>
+          </Target>
           <SearchPaths>
             <IncludeFiles Value="..;$(ProjOutDir)"/>
             <OtherUnitFiles Value=".."/>
-            <UnitOutputDirectory Value="fpc/$(TargetCPU)-$(TargetOS)"/>
+            <UnitOutputDirectory Value="fpc/lib/$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
             <SyntaxOptions>
@@ -29,6 +32,8 @@
           </Parsing>
           <CodeGeneration>
             <SmartLinkUnit Value="True"/>
+            <TargetCPU Value="i386"/>
+            <TargetOS Value="win32"/>
             <Optimizations>
               <OptimizationLevel Value="2"/>
             </Optimizations>
@@ -45,10 +50,13 @@
         <CompilerOptions>
           <Version Value="11"/>
           <PathDelim Value="\"/>
+          <Target>
+            <Filename Value="fpc\bin\$(TargetCPU)-$(TargetOS)\TestSQL3"/>
+          </Target>
           <SearchPaths>
             <IncludeFiles Value="..;$(ProjOutDir)"/>
             <OtherUnitFiles Value=".."/>
-            <UnitOutputDirectory Value="fpc\$(TargetCPU)-$(TargetOS)"/>
+            <UnitOutputDirectory Value="fpc\lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
             <SyntaxOptions>
@@ -105,6 +113,7 @@
               <OverflowChecks Value="True"/>
               <StackChecks Value="True"/>
             </Checks>
+            <TargetOS Value="linux"/>
           </CodeGeneration>
           <Linking>
             <Debugging>
@@ -122,21 +131,23 @@
         </CompilerOptions>
       </Item4>
     </BuildModes>
-    <Units Count="16">
+    <Units Count="29">
       <Unit0>
         <Filename Value="TestSQL3.dpr"/>
         <IsPartOfProject Value="True"/>
         <IsVisibleTab Value="True"/>
+        <TopLine Value="172"/>
+        <CursorPos Y="197"/>
         <UsageCount Value="471"/>
         <Loaded Value="True"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit0>
       <Unit1>
         <Filename Value="..\SynSelfTests.pas"/>
-        <EditorIndex Value="4"/>
+        <EditorIndex Value="6"/>
+        <TopLine Value="15469"/>
+        <CursorPos Y="15493"/>
         <UsageCount Value="235"/>
         <Loaded Value="True"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit1>
       <Unit2>
         <Filename Value="mORMotMongoDB.pas"/>
@@ -144,14 +155,14 @@
         <TopLine Value="82"/>
         <CursorPos X="33" Y="117"/>
         <UsageCount Value="235"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit2>
       <Unit3>
         <Filename Value="mORMot.pas"/>
-        <EditorIndex Value="2"/>
+        <EditorIndex Value="3"/>
+        <TopLine Value="1235"/>
+        <CursorPos X="7" Y="1256"/>
         <UsageCount Value="235"/>
         <Loaded Value="True"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit3>
       <Unit4>
         <Filename Value="..\SynCrtSock.pas"/>
@@ -159,7 +170,6 @@
         <TopLine Value="2142"/>
         <CursorPos X="14" Y="2133"/>
         <UsageCount Value="235"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit4>
       <Unit5>
         <Filename Value="..\SynFPCSock.pas"/>
@@ -167,14 +177,14 @@
         <TopLine Value="508"/>
         <CursorPos X="28" Y="541"/>
         <UsageCount Value="235"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit5>
       <Unit6>
         <Filename Value="mORMotSelfTests.pas"/>
-        <EditorIndex Value="3"/>
+        <EditorIndex Value="4"/>
+        <TopLine Value="170"/>
+        <CursorPos Y="195"/>
         <UsageCount Value="235"/>
         <Loaded Value="True"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit6>
       <Unit7>
         <Filename Value="mORMotHttpClient.pas"/>
@@ -182,20 +192,19 @@
         <TopLine Value="434"/>
         <CursorPos Y="464"/>
         <UsageCount Value="230"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit7>
       <Unit8>
         <Filename Value="..\SynCommons.pas"/>
-        <EditorIndex Value="1"/>
+        <EditorIndex Value="2"/>
+        <TopLine Value="11883"/>
+        <CursorPos X="12" Y="11870"/>
         <UsageCount Value="228"/>
         <Loaded Value="True"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit8>
       <Unit9>
         <Filename Value="..\SynDBRemote.pas"/>
         <EditorIndex Value="-1"/>
         <UsageCount Value="129"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit9>
       <Unit10>
         <Filename Value="..\SynLog.pas"/>
@@ -203,7 +212,6 @@
         <TopLine Value="3777"/>
         <CursorPos X="11" Y="3836"/>
         <UsageCount Value="18"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit10>
       <Unit11>
         <Filename Value="..\SynTest.pas"/>
@@ -211,7 +219,6 @@
         <TopLine Value="703"/>
         <CursorPos X="24" Y="743"/>
         <UsageCount Value="10"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit11>
       <Unit12>
         <Filename Value="C:\NewPascal\fpc\rtl\inc\rtti.inc"/>
@@ -223,9 +230,9 @@
       <Unit13>
         <Filename Value="C:\NewPascal\fpc\rtl\objpas\typinfo.pp"/>
         <EditorIndex Value="-1"/>
-        <TopLine Value="97"/>
-        <CursorPos X="7" Y="109"/>
-        <UsageCount Value="12"/>
+        <TopLine Value="31"/>
+        <CursorPos X="29" Y="48"/>
+        <UsageCount Value="13"/>
       </Unit13>
       <Unit14>
         <Filename Value="C:\NewTrunk\fpc\rtl\objpas\typinfo.pp"/>
@@ -233,7 +240,6 @@
         <TopLine Value="175"/>
         <CursorPos X="21" Y="190"/>
         <UsageCount Value="11"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit14>
       <Unit15>
         <Filename Value="C:\NewTrunk\fpc\rtl\inc\rtti.inc"/>
@@ -241,136 +247,126 @@
         <TopLine Value="244"/>
         <CursorPos X="14" Y="45"/>
         <UsageCount Value="12"/>
-        <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit15>
+      <Unit16>
+        <Filename Value="..\SynTests.pas"/>
+        <EditorIndex Value="5"/>
+        <TopLine Value="1044"/>
+        <CursorPos Y="1060"/>
+        <UsageCount Value="11"/>
+        <Loaded Value="True"/>
+      </Unit16>
+      <Unit17>
+        <Filename Value="..\Synopse.inc"/>
+        <EditorIndex Value="1"/>
+        <TopLine Value="244"/>
+        <CursorPos Y="260"/>
+        <UsageCount Value="11"/>
+        <Loaded Value="True"/>
+      </Unit17>
+      <Unit18>
+        <Filename Value="C:\NewPascal\fpc\packages\fcl-passrc\src\pparser.pp"/>
+        <UnitName Value="PParser"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="1271"/>
+        <CursorPos X="7" Y="1280"/>
+        <UsageCount Value="10"/>
+      </Unit18>
+      <Unit19>
+        <Filename Value="C:\NewPascal\fpc\packages\fcl-passrc\src\pscanner.pp"/>
+        <UnitName Value="PScanner"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="122"/>
+        <CursorPos X="5" Y="135"/>
+        <UsageCount Value="10"/>
+      </Unit19>
+      <Unit20>
+        <Filename Value="C:\NewPascal\fpc\packages\fcl-passrc\tests\tcscanner.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="838"/>
+        <CursorPos X="13" Y="851"/>
+        <UsageCount Value="10"/>
+      </Unit20>
+      <Unit21>
+        <Filename Value="C:\NewPascal\fpc\rtl\java\jsystem.inc"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="50"/>
+        <CursorPos X="3" Y="63"/>
+        <UsageCount Value="10"/>
+      </Unit21>
+      <Unit22>
+        <Filename Value="C:\NewPascal\fpc\rtl\inc\system.inc"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="50"/>
+        <CursorPos X="3" Y="63"/>
+        <UsageCount Value="10"/>
+      </Unit22>
+      <Unit23>
+        <Filename Value="..\SynDBMidasVCL.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="106"/>
+        <CursorPos X="13" Y="119"/>
+        <UsageCount Value="10"/>
+      </Unit23>
+      <Unit24>
+        <Filename Value="..\SynVirtualDataSet.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="200"/>
+        <CursorPos X="11" Y="213"/>
+        <UsageCount Value="10"/>
+      </Unit24>
+      <Unit25>
+        <Filename Value="..\SynTaskDialog.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="69"/>
+        <CursorPos X="12" Y="82"/>
+        <UsageCount Value="10"/>
+      </Unit25>
+      <Unit26>
+        <Filename Value="..\SynBidirSock.pas"/>
+        <EditorIndex Value="-1"/>
+        <UsageCount Value="10"/>
+      </Unit26>
+      <Unit27>
+        <Filename Value="..\SynDBSQLite3.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="397"/>
+        <CursorPos Y="410"/>
+        <UsageCount Value="10"/>
+      </Unit27>
+      <Unit28>
+        <Filename Value="..\SynDB.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="3983"/>
+        <CursorPos Y="3994"/>
+        <UsageCount Value="10"/>
+      </Unit28>
     </Units>
-    <JumpHistory Count="30" HistoryIndex="29">
+    <JumpHistory Count="6" HistoryIndex="5">
       <Position1>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="20542" Column="32" TopLine="20522"/>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="11129" TopLine="11111"/>
       </Position1>
       <Position2>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="20663" Column="66" TopLine="20643"/>
+        <Filename Value="TestSQL3.dpr"/>
+        <Caret Line="83" Column="8" TopLine="73"/>
       </Position2>
       <Position3>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="20678" Column="68" TopLine="20658"/>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="11129" TopLine="11111"/>
       </Position3>
       <Position4>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="20663" Column="59" TopLine="20658"/>
+        <Filename Value="mORMotSelfTests.pas"/>
+        <Caret Line="116" Column="5"/>
       </Position4>
       <Position5>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="20678" Column="68" TopLine="20658"/>
+        <Filename Value="..\SynTests.pas"/>
+        <Caret Line="1063" TopLine="1044"/>
       </Position5>
       <Position6>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="20736" Column="30" TopLine="20716"/>
+        <Filename Value="..\SynTests.pas"/>
+        <Caret Line="1060" TopLine="1044"/>
       </Position6>
-      <Position7>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21576" Column="32" TopLine="21556"/>
-      </Position7>
-      <Position8>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21580" Column="39" TopLine="21560"/>
-      </Position8>
-      <Position9>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21584" Column="32" TopLine="21564"/>
-      </Position9>
-      <Position10>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21719" Column="32" TopLine="21699"/>
-      </Position10>
-      <Position11>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21723" Column="39" TopLine="21703"/>
-      </Position11>
-      <Position12>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21727" Column="32" TopLine="21707"/>
-      </Position12>
-      <Position13>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21969" Column="46" TopLine="21949"/>
-      </Position13>
-      <Position14>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="21970" Column="52" TopLine="21950"/>
-      </Position14>
-      <Position15>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="22395" Column="38" TopLine="22375"/>
-      </Position15>
-      <Position16>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="22428" Column="38" TopLine="22408"/>
-      </Position16>
-      <Position17>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="23250" Column="51" TopLine="23230"/>
-      </Position17>
-      <Position18>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="28678" Column="49" TopLine="28658"/>
-      </Position18>
-      <Position19>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="29682" Column="44" TopLine="29662"/>
-      </Position19>
-      <Position20>
-        <Filename Value="mORMotSelfTests.pas"/>
-        <Caret Line="116" Column="3" TopLine="106"/>
-      </Position20>
-      <Position21>
-        <Filename Value="mORMotSelfTests.pas"/>
-      </Position21>
-      <Position22>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="34955" Column="34" TopLine="34912"/>
-      </Position22>
-      <Position23>
-        <Filename Value="mORMotSelfTests.pas"/>
-        <Caret Line="148" Column="5" TopLine="109"/>
-      </Position23>
-      <Position24>
-        <Filename Value="..\SynCommons.pas"/>
-      </Position24>
-      <Position25>
-        <Filename Value="..\SynCommons.pas"/>
-        <Caret Line="34409" Column="31" TopLine="34403"/>
-      </Position25>
-      <Position26>
-        <Filename Value="..\SynSelfTests.pas"/>
-        <Caret Line="3554" Column="5" TopLine="3542"/>
-      </Position26>
-      <Position27>
-        <Filename Value="..\SynSelfTests.pas"/>
-        <Caret Line="23" Column="50"/>
-      </Position27>
-      <Position28>
-        <Filename Value="..\SynSelfTests.pas"/>
-        <Caret Line="359" Column="19" TopLine="337"/>
-      </Position28>
-      <Position29>
-        <Filename Value="..\SynSelfTests.pas"/>
-        <Caret Line="3551" Column="30" TopLine="3540"/>
-      </Position29>
-      <Position30>
-        <Filename Value="TestSQL3.dpr"/>
-        <Caret Line="177" Column="9" TopLine="172"/>
-      </Position30>
     </JumpHistory>
   </ProjectSession>
-  <Debugging>
-    <Watches Count="1">
-      <Item1>
-        <Expression Value="result"/>
-        <DisplayStyle Value="wdfHex"/>
-      </Item1>
-    </Watches>
-  </Debugging>
 </CONFIG>
