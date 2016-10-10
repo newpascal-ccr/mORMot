@@ -34406,10 +34406,9 @@ begin // external name 'FPC_COPY' does not work as we need
 end;
 
 {$else USEFPCCOPY}
-
+// in theory, this should (must) work, but it does not !! :-(
 {$ifdef fpc}
-Function fpc_Copy_internal (Src, Dest, TypeInfo : Pointer) : SizeInt;[external name 'FPC_COPY'];
-//procedure RecordCopy(const Dest, Source, TypeInfo: pointer);
+function fpc_Copy_internal (Src, Dest, TypeInfo : Pointer) : SizeInt;[external name 'FPC_COPY'];
 procedure RecordCopy(const Dest; const Source; TypeInfo: pointer);assembler;nostackframe;
 // swap Dest and Source using assembler
 asm
@@ -34951,7 +34950,8 @@ begin
     inc(Diff,Field.Offset);
     inc(Field);
   end;
-  Diff := info^.recSize-Diff;
+  //Diff := info^.recSize-Diff;
+  Diff := GetRecordSize(TypeInfo)-Diff;
   if integer(Diff)<0 then
     raise ESynException.Create('RecordLoad diff') else
   if Diff<>0 then begin
