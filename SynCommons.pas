@@ -19837,7 +19837,8 @@ type
     tkSet,tkMethod,tkSString,tkLStringOld,tkLString,
     tkWString,tkVariant,tkArray,tkRecord,tkInterface,
     tkClass,tkObject,tkWChar,tkBool,tkInt64,tkQWord,
-    tkDynArray,tkInterfaceRaw,tkProcVar,tkUString,tkUChar,tkHelper);
+    tkDynArray,tkInterfaceRaw,tkProcVar,tkUString,tkUChar,
+    tkHelper,tkFile,tkClassRef,tkPointer);
 
 const
    // all potentially managed types
@@ -19859,12 +19860,14 @@ const
     dkSet,dkMethod,dkString,dkLString,dkLString,
     dkWString,dkVariant,dkArray,dkRecord,dkInterface,
     dkClass,dkRecord,dkWChar,dkEnumeration,dkInt64,dkInt64,
-    dkDynArray,dkInterface,dkProcedure,dkUString,dkWChar,dkPointer);
+    dkDynArray,dkInterface,dkProcedure,dkUString,dkWChar,
+    dkPointer,dkPointer,dkClassRef,dkPointer);
+
   DELPHITOFPC: array[TDelphiTypeKind] of TTypeKind = (
     tkUnknown, tkInteger, tkChar, tkEnumeration, tkFloat,
     tkSString, tkSet, tkClass, tkMethod, tkWChar, tkLString, tkWString,
     tkVariant, tkArray, tkRecord, tkInterface, tkInt64, tkDynArray,
-    tkUString, tkProcVar, tkProcVar, tkProcVar);
+    tkUString, tkClassRef, tkPointer, tkProcVar);
 
 {$else}
 

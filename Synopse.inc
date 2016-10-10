@@ -305,6 +305,10 @@
     {$define FPC_ENUMHASINNER}
   {$endif}
 
+  {$ifdef FPC_HAS_MANAGEMENT_OPERATORS}
+    {$define ISDELPHI2006ANDUP}
+  {$endif FPC_HAS_MANAGEMENT_OPERATORS}
+
 {$else FPC}
 
   {$ifndef PUREPASCAL} // if PUREPASCAL is forced, ignore any x86/x64 asm
