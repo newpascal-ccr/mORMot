@@ -145,7 +145,7 @@ begin
   AddCase(TTestClientServerAccess); // (*
   AddCase(TTestServiceOrientedArchitecture);
   AddCase(TTestBidirectionalRemoteConnection);
-  //AddCase(TTestExternalDatabase);
+  AddCase(TTestExternalDatabase);
   AddCase(TTestMultiThreadProcess);
   AddCase([TTestDDDSharedUnits,TTestDDDMultiThread]);
   //exit; // *)

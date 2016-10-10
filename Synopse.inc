@@ -145,6 +145,7 @@
   {$undef ENHANCEDRTL} // Delphi 2009 and up don't have our Enhanced Runtime library
   {$define HASVARUSTRING}
   {$define HASCODEPAGE}
+  {$define FPC_OR_UNICODE}
   { due to a bug in Delphi 2009+, we need to fake inheritance of record,
     since TDynArrayHashed = object(TDynArray) fails to initialize
     http://blog.synopse.info/post/2011/01/29/record-and-object-issue-in-Delphi-2010 }
