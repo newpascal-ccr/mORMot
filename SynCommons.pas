@@ -19990,6 +19990,21 @@ type
   {$endif}
 
   /// map the Delphi/FPC RTTI content
+  {$ifdef FPC_HAS_MANAGEMENT_OPERATORS}
+  PPRecordInitTable = ^PRecordInitTable;
+  PRecordInitTable = ^TRecordInitTable;
+  TRecordInitTable =
+    {$ifndef FPC_REQUIRES_PROPER_ALIGNMENT}
+    packed
+    {$endif FPC_REQUIRES_PROPER_ALIGNMENT}
+    record
+      recSize: longint;
+      Terminator: Pointer;
+      recManagementOperators: Pointer;
+      ManagedCount: longint;
+    end;
+  {$endif FPC_HAS_MANAGEMENT_OPERATORS}
+
   TTypeInfo =
     {$ifndef FPC_REQUIRES_PROPER_ALIGNMENT}
     packed
@@ -20038,7 +20053,7 @@ type
     tkRecord, tkObject:(
       recSize: longint;
       {$ifdef FPC_HAS_MANAGEMENT_OPERATORS}
-      InitTable: PPointer;
+      recInitTable: PPRecordInitTable;
       {$endif FPC_HAS_MANAGEMENT_OPERATORS}
       ManagedCount: longint;
     {$else}
