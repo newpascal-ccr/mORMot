@@ -6145,6 +6145,8 @@ function RecordLoadJSON(var Rec; const JSON: RawUTF8; TypeInfo: pointer): boolea
 /// copy a record content from source to Dest
 // - this unit includes a fast optimized asm version for x86
 procedure RecordCopy(var Dest; const Source; TypeInfo: pointer);
+//procedure RecordCopy(const Dest; const Source; TypeInfo: pointer);
+
 
 /// clear a record content
 // - this unit includes a fast optimized asm version for x86
@@ -20032,6 +20034,9 @@ type
     {$ifdef FPC}
     tkRecord, tkObject:(
       recSize: longint;
+      {$ifdef FPC_HAS_MANAGEMENT_OPERATORS}
+      InitTable: PPointer;
+      {$endif FPC_HAS_MANAGEMENT_OPERATORS}
       ManagedCount: longint;
     {$else}
     tkRecord: (
@@ -20634,6 +20639,51 @@ asm // eax=aTypeInfo edx=aExpectedKind
 end;
 {$endif}
 
+{$ifdef FPC}
+function GetRecordSize(typeInfo: Pointer): SizeInt;
+type
+  PRecordInfoInit=^TRecordInfoInit;
+  TRecordInfoInit=
+{$ifndef FPC_REQUIRES_PROPER_ALIGNMENT}
+  packed
+{$endif FPC_REQUIRES_PROPER_ALIGNMENT}
+  record
+    Size: Longint;
+    Terminator: Pointer;
+    RecordOp: Pointer;
+    Count: Longint;
+    { Elements: array[count] of TRecordElement }
+  end;
+var
+  RecordInfo: PRecordInfoInit;
+  initrtti: PTypeInfo;
+begin
+  case PTypeKind(typeInfo)^ of
+  tkObject:
+    result := GetTypeInfo(typeInfo,PTypeKind(typeInfo)^)^.recSize;
+  tkRecord:
+    begin
+      {$ifdef FPC_HAS_MANAGEMENT_OPERATORS}
+      RecordInfo:=pointer(GetTypeInfo(typeInfo,PTypeKind(typeInfo)^));
+      if RecordInfo=nil then result:=0 else
+      begin
+        if Assigned(RecordInfo^.Terminator) then
+        begin
+          initrtti:=PTypeInfo(RecordInfo)^.InitTable^;
+          RecordInfo:=aligntoptr(PtrUInt(initrtti)+2+PByte(initrtti)[1]);
+        end;
+        result:=RecordInfo^.Size;
+      end;
+      {$else FPC_HAS_MANAGEMENT_OPERATORS}
+      result := GetTypeInfo(typeInfo,PTypeKind(typeInfo)^)^.recSize;
+      {$endif FPC_HAS_MANAGEMENT_OPERATORS}
+    end;
+  else
+    raise ESynException.CreateUTF8('RTTIManagedSize(%)',[PByte(typeInfo)^]);
+  end;
+end;
+{$endif}
+
 function DynArrayTypeInfoToRecordInfo(aDynArrayTypeInfo: pointer;
   aDataSize: PInteger=nil): pointer;
 var info: PTypeInfo;
@@ -20683,7 +20733,8 @@ begin
   info := GetTypeInfo(aRecordTypeInfo,tkRecordTypeOrSet);
   if info=nil then
     result := 0 else
-    result := info^.recSize;
+    //result := info^.recSize;
+    result := GetRecordSize(aRecordTypeInfo);
 end;
 
 function GetEnumInfo(aTypeInfo: pointer; out MaxValue: Integer;
@@ -34337,7 +34388,7 @@ end;
 
 {$ifdef FPC}
 
-function RTTIManagedSize(typeInfo: Pointer): SizeInt; inline;
+function RTTIManagedSize(typeInfo: Pointer): SizeInt;// inline;
 begin
   case PTypeKind(typeInfo)^ of
     tkLString,tkLStringOld,tkWString,tkUString,
@@ -34352,7 +34403,7 @@ begin
         result := arraySize;
         //result := (arraySize and $7FFFFFFF) * ElCount; // to be validated
     tkObject,tkRecord:
-      result := GetTypeInfo(typeInfo,PTypeKind(typeInfo)^)^.recSize;
+      result := GetRecordSize(typeInfo);
   else
     raise ESynException.CreateUTF8('RTTIManagedSize(%)',[PByte(typeInfo)^]);
   end;
@@ -34364,12 +34415,54 @@ procedure RecordClear(var Dest; TypeInfo: pointer);
 procedure RecordAddRef(var Data; TypeInfo : pointer);
   [external name 'FPC_ADDREF'];
 
+{$ifndef USEFPCCOPY}
+
 procedure RecordCopy(var Dest; const Source; TypeInfo: pointer);
 begin // external name 'FPC_COPY' does not work as we need
   RecordClear(Dest,TypeInfo);
   MoveFast(Source,Dest,RTTIManagedSize(TypeInfo));
   RecordAddRef(Dest,TypeInfo);
 end;
+
+{$else USEFPCCOPY}
+
+{$ifdef fpc}
+Function fpc_Copy_internal (Src, Dest, TypeInfo : Pointer) : SizeInt;[external name 'FPC_COPY'];
+//procedure RecordCopy(const Dest, Source, TypeInfo: pointer);
+procedure RecordCopy(const Dest; const Source; TypeInfo: pointer);assembler;nostackframe;
+// swap Dest and Source using assembler
+asm
+ {$ifdef CPUX86}
+ xchg eax, edx
+ {$endif CPUX86}
+ {$ifdef CPUX64}
+ {$ifdef LINUX}
+ xchg rdi, rsi
+ {$else LINUX}
+ xchg rcx, rdx
+ {$endif LINUX}
+ {$endif CPUX64}
+ {$ifdef CPUARM}
+ eor r0, r0, r1 ; r0 <-- r0 xor r1
+ eor r1, r0, r1 ; r1 <-- (r0 xor r1) xor r1 = r0
+ eor r0, r0, r1 ; r0 <-- (r0 xor r1) xor r0 = r1
+ {$endif CPUARM}
+ {$ifdef CPUAARCH64}
+ eor x0, x0, x1 ; x0 <-- x0 xor x1
+ eor x1, x0, x1 ; x1 <-- (x0 xor x1) xor x1 = x0
+ eor x0, x0, x1 ; x0 <-- (x0 xor x1) xor x0 = x1
+{$endif CPUAARCH64}
+ jmp fpc_Copy_internal
+end;
+{$else}
+//procedure RecordCopy(const dest, source, typeinfo: ptypeinfo);
+procedure RecordCopy(const Dest; Source; TypeInfo: pointer);
+asm
+ jmp System.@CopyRecord
+end;
+{$endif}
+
+{$endif USEFPCCOPY}
 
 procedure CopyArray(dest, source, typeInfo: Pointer; cnt: PtrUInt);
 var i, size: SizeInt;
@@ -34473,7 +34566,8 @@ begin
           raise ESynException.CreateUTF8('RecordEquals(kind=%)',
             [ord(Field^.TypeInfo^.Kind)]) else begin
           if F=info^.ManagedCount then
-            Diff := info.recSize-Field^.Offset else
+            //Diff := info^.recSize-Field^.Offset else
+            Diff := GetRecordSize(TypeInfo)-Field^.Offset else
             Diff := info^.ManagedFields[F].Offset-Field^.Offset;
           if not CompareMem(A,B,Diff) then
             exit; // binary block not equal
@@ -34488,7 +34582,8 @@ begin
     inc(Diff,Field^.Offset);
     inc(Field);
   end;
-  if CompareMem(A,B,info.recSize-Diff) then
+  //if CompareMem(A,B,info^.recSize-Diff) then
+  if CompareMem(A,B,GetRecordSize(TypeInfo)-Diff) then
     result := true;
 end;
 
@@ -34507,7 +34602,8 @@ begin
     exit;
   end;
   Field := @info.ManagedFields[0];
-  result := info.recSize;
+  //result := info^.recSize;
+  result := GetRecordSize(TypeInfo);
   for F := 1 to info.ManagedCount do begin
     P := pointer(R+Field.Offset);
     case Field.TypeInfo^.Kind of
@@ -34539,7 +34635,8 @@ begin
         {$else}
         inc(PtrUInt(infoNested),infoNested^.NameLen);
         {$endif}
-        dec(result,infoNested^.recSize);
+        //dec(result,infoNested^.recSize);
+        dec(result,GetRecordSize(Deref(Field.TypeInfo)));
       end;
       {$ifndef NOVARIANTS}
       tkVariant: begin
@@ -34621,7 +34718,8 @@ begin
       {$else}
       inc(PtrUInt(infoNested),infoNested^.NameLen);
       {$endif}
-      Diff := infoNested^.recSize;
+      //Diff := infoNested^.recSize;
+      Diff := GetRecordSize(Deref(Field.TypeInfo));
     end;
     {$ifndef NOVARIANTS}
     tkVariant: begin
@@ -34638,7 +34736,8 @@ begin
         if Field^.TypeInfo^.Kind in tkManagedTypes then
           raise ESynException.CreateUTF8('RecordSave(kind=%)',[ord(Field^.TypeInfo^.Kind)]) else begin
           if F=info^.ManagedCount then
-            Diff := info.recSize-Field^.Offset else
+            //Diff := info^.recSize-Field^.Offset else
+            Diff := GetRecordSize(TypeInfo)-Field^.Offset else
             Diff := info^.ManagedFields[F].Offset-Field^.Offset;
           MoveFast(R^,Dest^,Diff);
           inc(Dest,Diff);
@@ -34654,7 +34753,8 @@ begin
     inc(Diff,Field.Offset);
     inc(Field);
   end;
-  Diff := info^.recSize-Diff;
+  //Diff := info^.recSize-Diff;
+  Diff := GetRecordSize(TypeInfo)-Diff;
   if integer(Diff)<0 then
     raise ESynException.Create('RecordSave diff') else
   if Diff<>0 then begin
@@ -34839,7 +34939,8 @@ begin
       {$else}
       inc(PtrUInt(infoNested),infoNested^.NameLen);
       {$endif}
-      Diff := infoNested^.recSize;
+      //Diff := infoNested^.recSize;
+      Diff := GetRecordSize(Deref(Field.TypeInfo));
     end;
     {$ifndef NOVARIANTS}
     tkVariant: begin
@@ -34852,7 +34953,8 @@ begin
         if Field^.TypeInfo^.Kind in tkManagedTypes then
           raise ESynException.CreateUTF8('RecordLoad(kind=%)',[ord(Field^.TypeInfo^.Kind)]) else begin
           if F=info^.ManagedCount then
-            Diff := info.recSize-Field^.Offset else
+            //Diff := info^.recSize-Field^.Offset else
+            Diff := GetRecordSize(TypeInfo)-Field^.Offset else
             Diff := info^.ManagedFields[F].Offset-Field^.Offset;
           MoveFast(Source^,R^,Diff);
           inc(Source,Diff);
@@ -45638,7 +45740,8 @@ begin
   info := GetTypeInfo(TypeInfo,tkRecordTypeOrSet);
   if (self=nil) or (info=nil) then
     raise ESynException.CreateUTF8('Invalid %.AddVoidRecordJSON(%)',[self,TypeInfo]);
-  SetLength(tmp,info^.recSize {$ifdef FPC}and $7FFFFFFF{$endif});
+  //SetLength(tmp,info^.recSize {$ifdef FPC}and $7FFFFFFF{$endif});
+  SetLength(tmp,GetRecordSize(TypeInfo) {$ifdef FPC}and $7FFFFFFF{$endif});
   AddRecordJSON(tmp[0],TypeInfo);
 end;
 
