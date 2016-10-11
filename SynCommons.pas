@@ -51123,9 +51123,9 @@ begin
 {$ifdef FPC}
   'Free Pascal'
   {$ifdef VER2_6_4}+' 2.6.4'{$endif}
-  {$ifdef VER2_7_0}+' 2.7.0'{$endif}
-  {$ifdef VER2_7_1}+' 2.7.1'{$endif}
+  {$ifdef VER3_0_0}+' 3.0.0'{$endif}
   {$ifdef VER3_0_1}+' 3.0.1'{$endif}
+  {$ifdef VER3_0_2}+' 3.0.2'{$endif}
   {$ifdef VER3_1_1}+' 3.1.1'{$endif}
 {$else}
   {$ifdef VER130} 'Delphi 5'{$endif}
