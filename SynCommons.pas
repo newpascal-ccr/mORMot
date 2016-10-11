@@ -6145,8 +6145,6 @@ function RecordLoadJSON(var Rec; const JSON: RawUTF8; TypeInfo: pointer): boolea
 /// copy a record content from source to Dest
 // - this unit includes a fast optimized asm version for x86
 procedure RecordCopy(var Dest; const Source; TypeInfo: pointer);
-//procedure RecordCopy(const Dest; const Source; TypeInfo: pointer);
-
 
 /// clear a record content
 // - this unit includes a fast optimized asm version for x86
@@ -20657,51 +20655,6 @@ asm // eax=aTypeInfo edx=aExpectedKind
 end;
 {$endif}
 
-{$ifdef FPC}
-function GetRecordSize(typeInfo: Pointer): SizeInt;
-type
-  PRecordInfoInit=^TRecordInfoInit;
-  TRecordInfoInit=
-{$ifndef FPC_REQUIRES_PROPER_ALIGNMENT}
-  packed
-{$endif FPC_REQUIRES_PROPER_ALIGNMENT}
-  record
-    Size: Longint;
-    Terminator: Pointer;
-    RecordOp: Pointer;
-    Count: Longint;
-    { Elements: array[count] of TRecordElement }
-  end;
-var
-  RecordInfo: PRecordInfoInit;
-  initrtti: PTypeInfo;
-begin
-  case PTypeKind(typeInfo)^ of
-  tkObject:
-    result := GetTypeInfo(typeInfo,PTypeKind(typeInfo)^)^.recSize;
-  tkRecord:
-    begin
-      {$ifdef FPC_HAS_MANAGEMENT_OPERATORS}
-      RecordInfo:=pointer(GetTypeInfo(typeInfo,PTypeKind(typeInfo)^));
-      if RecordInfo=nil then result:=0 else
-      begin
-        if Assigned(RecordInfo^.Terminator) then
-        begin
-          initrtti:=PTypeInfo(RecordInfo)^.InitTable^;
-          RecordInfo:=aligntoptr(PtrUInt(initrtti)+2+PByte(initrtti)[1]);
-        end;
-        result:=RecordInfo^.Size;
-      end;
-      {$else FPC_HAS_MANAGEMENT_OPERATORS}
-      result := GetTypeInfo(typeInfo,PTypeKind(typeInfo)^)^.recSize;
-      {$endif FPC_HAS_MANAGEMENT_OPERATORS}
-    end;
-  else
-    raise ESynException.CreateUTF8('RTTIManagedSize(%)',[PByte(typeInfo)^]);
-  end;
-end;
-{$endif}
-
 function DynArrayTypeInfoToRecordInfo(aDynArrayTypeInfo: pointer;
   aDataSize: PInteger=nil): pointer;
 var info: PTypeInfo;
@@ -20751,8 +20704,7 @@ begin
   info := GetTypeInfo(aRecordTypeInfo,tkRecordTypeOrSet);
   if info=nil then
     result := 0 else
-    //result := info^.recSize;
-    result := GetRecordSize(aRecordTypeInfo);
+    result := info^.recSize;
 end;
 
 function GetEnumInfo(aTypeInfo: pointer; out MaxValue: Integer;
@@ -34387,7 +34339,7 @@ end;
 
 {$ifdef FPC}
 
-function RTTIManagedSize(typeInfo: Pointer): SizeInt;// inline;
+function RTTIManagedSize(typeInfo: Pointer): SizeInt; inline;
 begin
   case PTypeKind(typeInfo)^ of
     tkLString,tkLStringOld,tkWString,tkUString,
@@ -34402,7 +34354,7 @@ begin
         result := arraySize;
         //result := (arraySize and $7FFFFFFF) * ElCount; // to be validated
     tkObject,tkRecord:
-      result := GetRecordSize(typeInfo);
+      result := GetTypeInfo(typeInfo,PTypeKind(typeInfo)^)^.recSize;
   else
     raise ESynException.CreateUTF8('RTTIManagedSize(%)',[PByte(typeInfo)^]);
   end;
@@ -34564,8 +34516,7 @@ begin
           raise ESynException.CreateUTF8('RecordEquals(kind=%)',
             [ord(Field^.TypeInfo^.Kind)]) else begin
           if F=info^.ManagedCount then
-            //Diff := info^.recSize-Field^.Offset else
-            Diff := GetRecordSize(TypeInfo)-Field^.Offset else
+            Diff := info^.recSize-Field^.Offset else
             Diff := info^.ManagedFields[F].Offset-Field^.Offset;
           if not CompareMem(A,B,Diff) then
             exit; // binary block not equal
@@ -34580,8 +34531,7 @@ begin
     inc(Diff,Field^.Offset);
     inc(Field);
   end;
-  //if CompareMem(A,B,info^.recSize-Diff) then
-  if CompareMem(A,B,GetRecordSize(TypeInfo)-Diff) then
+  if CompareMem(A,B,info^.recSize-Diff) then
     result := true;
 end;
 
@@ -34599,14 +34549,13 @@ begin
     result := 0; // should have been checked before
     exit;
   end;
-  Field := @info.ManagedFields[0];
-  //result := info^.recSize;
-  result := GetRecordSize(TypeInfo);
-  for F := 1 to info.ManagedCount do begin
-    P := pointer(R+Field.Offset);
-    case Field.TypeInfo^.Kind of
+  Field := @info^.ManagedFields[0];
+  result := info^.recSize;
+  for F := 1 to info^.ManagedCount do begin
+    P := pointer(R+Field^.Offset);
+    case Field^.TypeInfo^.Kind of
       tkDynArray: begin
-        DynArray.Init(Deref(Field.TypeInfo),P^);
+        DynArray.Init(Deref(Field^.TypeInfo),P^);
         inc(result,DynArray.SaveToLength-sizeof(PtrUInt));
       end;
       tkLString,tkWString{$ifdef FPC},tkLStringOld{$endif}:
@@ -34621,7 +34570,7 @@ begin
           inc(result,ToVarUInt32LengthWithData(PStrRec(Pointer(P^-STRRECSIZE))^.length*2)-sizeof(PtrUInt));
       {$endif}
       tkRecord{$ifdef FPC},tkObject{$endif}: begin
-        infoNested := Deref(Field.TypeInfo); // inlined GetTypeInfo()
+        infoNested := Deref(Field^.TypeInfo); // inlined GetTypeInfo()
         Len := RecordSaveLength(P^,infoNested);
         if Len=0 then begin
           result := 0;
@@ -34633,8 +34582,7 @@ begin
         {$else}
         inc(PtrUInt(infoNested),infoNested^.NameLen);
         {$endif}
-        //dec(result,infoNested^.recSize);
-        dec(result,GetRecordSize(Deref(Field.TypeInfo)));
+        dec(result,infoNested^.recSize);
       end;
       {$ifndef NOVARIANTS}
       tkVariant: begin
@@ -34681,10 +34629,10 @@ begin
       inc(R,Diff);
       inc(Dest,Diff);
     end;
-    Kind := Field.TypeInfo^.Kind;
+    Kind := Field^.TypeInfo^.Kind;
     case Kind of
     tkDynArray: begin
-      DynArray.Init(Deref(Field.TypeInfo),R^);
+      DynArray.Init(Deref(Field^.TypeInfo),R^);
       Dest := DynArray.SaveTo(Dest);
       Diff := sizeof(PtrUInt); // size of tkDynArray in record
     end;
@@ -34705,7 +34653,7 @@ begin
       Diff := sizeof(PtrUInt); // size of tkLString+tkWString+tkUString in record
     end;
     tkRecord{$ifdef FPC},tkObject{$endif}: begin
-      infoNested := Deref(Field.TypeInfo); // inlined GetTypeInfo()
+      infoNested := Deref(Field^.TypeInfo); // inlined GetTypeInfo()
       Dest := RecordSave(R^,Dest,infoNested);
       if Dest=nil then begin
         result := nil; // invalid/unhandled record content
@@ -34716,8 +34664,7 @@ begin
       {$else}
       inc(PtrUInt(infoNested),infoNested^.NameLen);
       {$endif}
-      //Diff := infoNested^.recSize;
-      Diff := GetRecordSize(Deref(Field.TypeInfo));
+      Diff := infoNested^.recSize;
     end;
     {$ifndef NOVARIANTS}
     tkVariant: begin
@@ -34734,8 +34681,7 @@ begin
         if Field^.TypeInfo^.Kind in tkManagedTypes then
           raise ESynException.CreateUTF8('RecordSave(kind=%)',[ord(Field^.TypeInfo^.Kind)]) else begin
           if F=info^.ManagedCount then
-            //Diff := info^.recSize-Field^.Offset else
-            Diff := GetRecordSize(TypeInfo)-Field^.Offset else
+            Diff := info^.recSize-Field^.Offset else
             Diff := info^.ManagedFields[F].Offset-Field^.Offset;
           MoveFast(R^,Dest^,Diff);
           inc(Dest,Diff);
@@ -34751,8 +34697,7 @@ begin
     inc(Diff,Field.Offset);
     inc(Field);
   end;
-  //Diff := info^.recSize-Diff;
-  Diff := GetRecordSize(TypeInfo)-Diff;
+  Diff := info^.recSize-Diff;
   if integer(Diff)<0 then
     raise ESynException.Create('RecordSave diff') else
   if Diff<>0 then begin
@@ -34897,10 +34842,10 @@ begin
       inc(Source,Diff);
       inc(R,Diff);
     end;
-    Kind := Field.TypeInfo^.Kind;
+    Kind := Field^.TypeInfo^.Kind;
     case Kind of
     tkDynArray: begin
-      DynArray.Init(Deref(Field.TypeInfo),R^);
+      DynArray.Init(Deref(Field^.TypeInfo),R^);
       Source := DynArray.LoadFrom(Source);
       Diff := sizeof(PtrUInt); // size of tkDynArray in record
     end;
@@ -34913,7 +34858,7 @@ begin
           {$ifdef HASCODEPAGE}
           { Delphi 2009+: set Code page for this AnsiString }
           if LenBytes<>0 then begin
-            infoNested := Deref(Field.TypeInfo); 
+            infoNested := Deref(Field^.TypeInfo); 
             SetCodePage(PRawByteString(R)^,
               PWord(PtrUInt(infoNested)+infoNested^.NameLen+2)^,false);
           end;
@@ -34930,15 +34875,14 @@ begin
       Diff := sizeof(PtrUInt); // size of tkLString+tkWString+tkUString in record
     end;
     tkRecord{$ifdef FPC},tkObject{$endif}: begin
-      infoNested := Deref(Field.TypeInfo); // inlined GetTypeInfo()
+      infoNested := Deref(Field^.TypeInfo); // inlined GetTypeInfo()
       Source := RecordLoad(R^,Source,infoNested);
       {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
       infoNested := GetFPCAlignPtr(infoNested);
       {$else}
       inc(PtrUInt(infoNested),infoNested^.NameLen);
       {$endif}
-      //Diff := infoNested^.recSize;
-      Diff := GetRecordSize(Deref(Field.TypeInfo));
+      Diff := infoNested^.recSize;
     end;
     {$ifndef NOVARIANTS}
     tkVariant: begin
@@ -34951,8 +34895,7 @@ begin
         if Field^.TypeInfo^.Kind in tkManagedTypes then
           raise ESynException.CreateUTF8('RecordLoad(kind=%)',[ord(Field^.TypeInfo^.Kind)]) else begin
           if F=info^.ManagedCount then
-            //Diff := info^.recSize-Field^.Offset else
-            Diff := GetRecordSize(TypeInfo)-Field^.Offset else
+            Diff := info^.recSize-Field^.Offset else
             Diff := info^.ManagedFields[F].Offset-Field^.Offset;
           MoveFast(Source^,R^,Diff);
           inc(Source,Diff);
@@ -34968,8 +34911,7 @@ begin
     inc(Diff,Field.Offset);
     inc(Field);
   end;
-  //Diff := info^.recSize-Diff;
-  Diff := GetRecordSize(TypeInfo)-Diff;
+  Diff := info^.recSize-Diff;
   if integer(Diff)<0 then
     raise ESynException.Create('RecordLoad diff') else
   if Diff<>0 then begin
@@ -45739,8 +45681,7 @@ begin
   info := GetTypeInfo(TypeInfo,tkRecordTypeOrSet);
   if (self=nil) or (info=nil) then
     raise ESynException.CreateUTF8('Invalid %.AddVoidRecordJSON(%)',[self,TypeInfo]);
-  //SetLength(tmp,info^.recSize {$ifdef FPC}and $7FFFFFFF{$endif});
-  SetLength(tmp,GetRecordSize(TypeInfo) {$ifdef FPC}and $7FFFFFFF{$endif});
+  SetLength(tmp,info^.recSize {$ifdef FPC}and $7FFFFFFF{$endif});
   AddRecordJSON(tmp[0],TypeInfo);
 end;
 
