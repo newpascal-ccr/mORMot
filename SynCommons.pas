@@ -2555,7 +2555,7 @@ function StrCompFast(Str1, Str2: pointer): PtrInt;
 
 /// x86 asm version of StrComp(), to be used with PUTF8Char/PAnsiChar
 // - this version won't access the memory beyond the string, so may be
-// preferred to StrcompSSE42 or StrComp, when using e.g. mapped files
+// preferred to StrCompSSE42 or StrComp, when using e.g. mapped files
 function StrCompFast(Str1, Str2: pointer): PtrInt;
 
 /// SSE 4.2 version of StrComp(), to be used with PUTF8Char/PAnsiChar
@@ -10498,16 +10498,19 @@ type
 // - using Short4 as returned string would avoid a string allocation on heap
 // - could be used e.g. as parameter to FormatUTF8()
 function UInt4DigitsToShort(Value: Cardinal): Short4;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// creates a 3 digits short string from a 0..999 value
 // - using Short4 as returned string would avoid a string allocation on heap
 // - could be used e.g. as parameter to FormatUTF8()
 function UInt3DigitsToShort(Value: Cardinal): Short4;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// creates a 2 digits short string from a 0..99 value
 // - using Short4 as returned string would avoid a string allocation on heap
 // - could be used e.g. as parameter to FormatUTF8()
 function UInt2DigitsToShort(Value: byte): Short4;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// compare to floating point values, with IEEE 754 double precision
 // - use this function instead of raw = operator
@@ -10558,7 +10561,7 @@ function fnv32(crc: cardinal; buf: PAnsiChar; len: cardinal): cardinal;
 
 /// perform very fast xxHash hashing in 32-bit mode
 // - will use optimized asm for x86/x64, or a pascal version on other CPUs
-function xxHash32(P: PAnsiChar; len: integer; seed: cardinal = 0): cardinal;
+function xxHash32(crc: cardinal; P: PAnsiChar; len: integer): cardinal;
 
 var
   /// tables used by crc32cfast() function
@@ -10589,15 +10592,28 @@ function crc63c(buf: PAnsiChar; len: cardinal): Int64;
 
 type
   /// store a 128-bit hash value
-  // - e.g. a MD5 digest, or an AES block
+  // - e.g. a MD5 digest, an AES block, or array[0..3] of cardinal
   THash128 = array[0..15] of byte;
   /// store a 256-bit hash value
-  // - e.g. a SHA-256 digest, or a TECCSignature result
+  // - e.g. a SHA-256 digest, a TECCSignature result, or array[0..7] of cardinal
   THash256 = array[0..31] of byte;
+  /// store a 128-bit buffer
+  TBlock128 = array[0..3] of cardinal;
+
   /// pointer to a 128-bit hash value
   PHash128 = ^THash128;
+  /// map a 256-bit hash as an array of two 128-bit hash values 
+  THash128Rec = packed record
+    Lo,Hi: THash128
+  end;
+  /// map an infinite array of 128-bit hash values
+  THash128Array = array[0..(maxInt div sizeof(THash128))-1] of THash128;
+  /// pointer to an infinite array of 128-bit hash values
+  PHash128Array = ^THash128Array;
   /// pointer to a 256-bit hash value
   PHash256 = ^THash256;
+  /// pointer to a 128-bit buffer
+  PBlock128 = ^TBlock128;
 
 /// compute a 128-bit checksum on the supplied buffer using crc32c
 // - will use SSE 4.2 hardware accelerated instruction, if available
@@ -10605,15 +10621,32 @@ type
 // - by design, such combined hashes cannot be cascaded
 procedure crc128c(buf: PAnsiChar; len: cardinal; out crc: THash128);
 
+/// compute a proprietary 128-bit CRC of a 128-bit binary buffer
+// - will use SSE 4.2 hardware accelerated instruction, if available
+// - is used e.g. by SynCrypto's TAESCFBCRC to check for data integrity
+procedure crcblock(crc128, data128: PBlock128);
+
+/// compute a proprietary 128-bit CRC of 128-bit binary buffers
+// - will use SSE 4.2 hardware accelerated instruction, if available
+// - is used e.g. by SynEcc's TECDHEProtocol.ComputeMAC for macCrc128c
+procedure crcblocks(crc128, data128: PBlock128; count: integer);
+
+{$ifdef CPUINTEL}
+/// pure pascal computation of our 128-bit CRC of a 128-bit binary buffer
+// - to be used for regression tests only: crcblock will use the fastest
+// implementation available on the current CPU
+procedure crcblockpas(crc128, data128: PBlock128);
+{$endif}
+
 /// returns TRUE if all 16 bytes of this 128-bit buffer equal zero
 // - e.g. a MD5 digest, or an AES block
 function IsZero(const dig: THash128): boolean; overload;
-  {$ifdef HASINLINE}inline;{$endif} overload;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// returns TRUE if all 16 bytes of both 128-bit buffers do match
 // - e.g. a MD5 digest, or an AES block
 function IsEqual(const A,B: THash128): boolean; overload;
-  {$ifdef HASINLINE}inline;{$endif} overload;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// fill all 16 bytes of this 128-bit buffer with zero
 // - may be used to cleanup stack-allocated content
@@ -10629,12 +10662,12 @@ procedure crc256c(buf: PAnsiChar; len: cardinal; out crc: THash256);
 /// returns TRUE if all 32 bytes of this 256-bit buffer equal zero
 // - e.g. a SHA-256 digest, or a TECCSignature result
 function IsZero(const dig: THash256): boolean; overload;
-  {$ifdef HASINLINE}inline;{$endif} overload;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// returns TRUE if all 32 bytes of both 256-bit buffers do match
 // - e.g. a SHA-256 digest, or a TECCSignature result
 function IsEqual(const A,B: THash256): boolean; overload;
-  {$ifdef HASINLINE}inline;{$endif} overload;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// fill all 32 bytes of this 256-bit buffer with zero
 // - may be used to cleanup stack-allocated content
@@ -17061,7 +17094,7 @@ var tmp: TSynTempBuffer;
 begin
   if SourceChars=0 then
     result := '' else begin
-    tmp.Init(SourceChars*2+1); // max dest size in bytes + TrailingZero
+    tmp.Init(SourceChars*2+1); // max dest size in bytes (including trailing #0 widechar) 
     U := AnsiBufferToUnicode(tmp.buf,Source,SourceChars);
     SetString(result,PWideChar(tmp.buf),(PtrUInt(U)-PtrUInt(tmp.buf))shr 1);
     tmp.Done;
@@ -17074,7 +17107,7 @@ var tmp: TSynTempBuffer;
 begin
   if Source='' then
     result := '' else begin
-    tmp.Init(length(Source)*2+1); // max dest size in bytes + TrailingZero
+    tmp.Init(length(Source)*2+1); // max dest size in bytes
     U := AnsiBufferToUnicode(tmp.buf,pointer(Source),length(Source));
     SetString(result,PWideChar(tmp.buf),(PtrUInt(U)-PtrUInt(tmp.buf))shr 1);
     tmp.Done;
@@ -30560,9 +30593,9 @@ end;
 {$ifdef CPUINTEL} // use optimized x86/x64 asm versions for xxHash32
 
 {$ifdef CPUX86}
-function xxHash32(P: PAnsiChar; len: integer; seed: cardinal = 0): cardinal;
+function xxHash32(crc: cardinal; P: PAnsiChar; len: integer): cardinal;
 asm
-        xchg    eax, ecx // compiled with gcc using __fastcall
+        xchg    edx, ecx
         push    ebp
         push    edi
         lea     ebp, [ecx+edx]
@@ -30581,23 +30614,27 @@ asm
         mov     edx, eax
         lea     eax, [ebx+61C8864FH]
         mov     ebp, edx
-@1:     imul    edx, dword ptr [ecx], -2048144777
-        add     ecx, 16
+@1:     mov     edx, dword ptr [ecx]
+        imul    edx, -2048144777
         add     edi, edx
-        imul    edx, dword ptr [ecx-0CH], -2048144777
         rol     edi, 13
-        imul    edi, edi, -1640531535
+        imul    edi, -1640531535
+        mov     edx, dword ptr [ecx+4]
+        imul    edx, -2048144777
         add     esi, edx
-        imul    edx, dword ptr [ecx-8H], -2048144777
         rol     esi, 13
-        imul    esi, esi, -1640531535
+        imul    esi, -1640531535
+        mov     edx, dword ptr [ecx+8]
+        imul    edx, -2048144777
         add     ebx, edx
-        imul    edx, dword ptr [ecx-4H], -2048144777
         rol     ebx, 13
-        imul    ebx, ebx, -1640531535
+        imul    ebx, -1640531535
+        mov     edx, dword ptr [ecx+12]
+        lea     ecx, [ecx+16]
+        imul    edx, -2048144777
         add     eax, edx
         rol     eax, 13
-        imul    eax, eax, -1640531535
+        imul    eax, -1640531535
         cmp     ebp, ecx
         jnc     @1
         rol     edi, 1
@@ -30636,6 +30673,7 @@ asm
         imul    eax, eax, -1640531535
         cmp     ebp, ecx
         jnz     @5
+        nop
 @6:     mov     edx, eax
         add     esp, 8
         shr     edx, 15
@@ -30656,16 +30694,21 @@ end;
 {$endif CPUX86}
 
 {$ifdef CPUX64}
-function xxHash32(P: PAnsiChar; len: integer; seed: cardinal = 0): cardinal;
+function xxHash32(crc: cardinal; P: PAnsiChar; len: integer): cardinal;
 asm
-        {$ifdef LINUX}
-        mov     r8, rdx
-        mov     rcx, rdi
-        mov     rdx, rsi
-        {$else}
+        {$ifdef LINUX} // crc=rdi P=rsi len=rdx
+        mov     r8, rsi
+        mov     rcx, rdx
+        mov     rdx, rdi
+        {$else} // crc=r8 P=rcx len=rdx
+        mov     r10, r8
+        mov     r8, rcx
+        mov     rcx, rdx
+        mov     rdx, r10
         push    rsi   // Win64 expects those registers to be preserved
         push    rdi
         {$endif}
+        // P=r8 len=rcx crc=rdx
         push    rbx
         lea     r10, [rcx+rdx]
         cmp     rdx, 15
@@ -30798,7 +30841,7 @@ begin
       c3 := seed;
       c2 := c3 + PRIME32_2;
       c1 := c2 + PRIME32_1;
-      c4 := c3 + cardinal(-Int64(PRIME32_1));
+      c4 := c3 + cardinal(0-PRIME32_1);
       repeat
         c1 := PRIME32_1 * Rol13(c1 + PRIME32_2 * PCardinal(P)^);
         c2 := PRIME32_1 * Rol13(c2 + PRIME32_2 * PCardinal(P+4)^);
@@ -30915,6 +30958,160 @@ asm // ecx=crc, rdx=buf, r8=len (Linux: edi,rsi,rdx)
         jz      @0
         crc32   eax, byte ptr[rdx + 2]
 @0:     not     eax
+end;
+{$endif CPU64}
+{$endif CPUINTEL}
+
+procedure crcblocks(crc128, data128: PBlock128; count: integer);
+begin
+  while count>0 do begin
+    crcblock(crc128,data128);
+    inc(data128);
+    dec(count);
+  end;
+end;
+
+{$ifdef CPUINTEL}
+procedure crcblockpas(crc128, data128: PBlock128);
+{$else}
+procedure crcblock(crc128, data128: PBlock128);
+{$endif CPUINTEL}
+{$ifdef PUREPASCAL}
+var c: cardinal;
+begin
+  c := crc128^[0] xor data128^[0];
+  crc128^[0] := crc32ctab[3,ToByte(c)] xor crc32ctab[2,ToByte(c shr 8)]
+            xor crc32ctab[1,ToByte(c shr 16)] xor crc32ctab[0,c shr 24];
+  c := crc128^[1] xor data128^[1];
+  crc128^[1] := crc32ctab[3,ToByte(c)] xor crc32ctab[2,ToByte(c shr 8)]
+            xor crc32ctab[1,ToByte(c shr 16)] xor crc32ctab[0,c shr 24];
+  c := crc128^[2] xor data128^[2];
+  crc128^[2] := crc32ctab[3,ToByte(c)] xor crc32ctab[2,ToByte(c shr 8)]
+            xor crc32ctab[1,ToByte(c shr 16)] xor crc32ctab[0,c shr 24];
+  c := crc128^[3] xor data128^[3];
+  crc128^[3] := crc32ctab[3,ToByte(c)] xor crc32ctab[2,ToByte(c shr 8)]
+            xor crc32ctab[1,ToByte(c shr 16)] xor crc32ctab[0,c shr 24];
+end;
+{$else}
+asm // Delphi is not efficient about compiling above pascal code
+        push    ebp
+        push    edi
+        push    esi
+        mov     ebp, eax  // ebp=crc128 edi=data128
+        mov     edi, edx
+        mov     edx, dword ptr[eax]
+        mov     ecx, dword ptr[eax + 4]
+        xor     edx, dword ptr[edi]
+        xor     ecx, dword ptr[edi + 4]
+        movzx   esi, dl
+        mov     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 3]
+        movzx   esi, dh
+        shr     edx, 16
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 2]
+        movzx   esi, dl
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 1]
+        movzx   esi, dh
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 0]
+        mov     edx, dword ptr[ebp + 8]
+        xor     edx, dword ptr[edi + 8]
+        mov     dword ptr[ebp], eax
+        movzx   esi, cl
+        mov     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 3]
+        movzx   esi, ch
+        shr     ecx, 16
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 2]
+        movzx   esi, cl
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 1]
+        movzx   esi, ch
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 0]
+        mov     dword ptr[ebp + 4], eax
+        mov     ecx, dword ptr[ebp + 12]
+        xor     ecx, dword ptr[edi + 12]
+        movzx   esi, dl
+        mov     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 3]
+        movzx   esi, dh
+        shr     edx, 16
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 2]
+        movzx   esi, dl
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 1]
+        movzx   esi, dh
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 0]
+        mov     dword ptr[ebp + 8], eax
+        movzx   esi, cl
+        mov     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 3]
+        movzx   esi, ch
+        shr     ecx, 16
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 2]
+        movzx   esi, cl
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 1]
+        movzx   esi, ch
+        xor     eax, dword ptr[esi * 4 + crc32ctab + 1024 * 0]
+        mov     dword ptr[ebp + 12], eax
+        pop     esi
+        pop     edi
+        pop     ebp
+end;
+{$endif}
+{$ifdef CPUINTEL}
+procedure crcblock(crc128, data128: PBlock128);
+{$ifdef CPU64}
+{$ifdef FPC}nostackframe; assembler;
+asm
+{$else}
+asm // rcx=crc128, rdx=data128 (Linux: rdi,rsi)
+        .NOFRAME
+{$endif FPC}
+        test    byte ptr [CpuFeatures+6], $10 // cfSSE42 in CpuFeatures
+        jz      crcblockpas
+        {$ifdef Linux}
+        mov     rcx, rdi
+        mov     rdx, rsi
+        {$endif Linux}
+        mov     eax, dword ptr[rcx]
+        mov     r8d, dword ptr[rcx+4]
+        mov     r9d, dword ptr[rcx+8]
+        mov     r10d, dword ptr[rcx+12]
+        crc32   eax, dword ptr[rdx]
+        crc32   r8d, dword ptr[rdx+4]
+        crc32   r9d, dword ptr[rdx+8]
+        crc32   r10d, dword ptr[rdx+12]
+        mov     dword ptr[rcx], eax
+        mov     dword ptr[rcx+4], r8d
+        mov     dword ptr[rcx+8], r9d
+        mov     dword ptr[rcx+12], r10d
+end;
+{$else}
+asm // eax=crc128, edx=data128
+        test    byte ptr [CpuFeatures+6], $10 // cfSSE42 in CpuFeatures
+        mov     ecx, eax
+        jz      crcblockpas
+        {$ifdef ISDELPHI2010}
+        mov     eax, dword ptr[ecx]
+        crc32   eax, dword ptr[edx]
+        mov     dword ptr[ecx], eax
+        mov     eax, dword ptr[ecx+4]
+        crc32   eax, dword ptr[edx+4]
+        mov     dword ptr[ecx+4], eax
+        mov     eax, dword ptr[ecx+8]
+        crc32   eax, dword ptr[edx+8]
+        mov     dword ptr[ecx+8], eax
+        mov     eax, dword ptr[ecx+12]
+        crc32   eax, dword ptr[edx+12]
+        mov     dword ptr[ecx+12], eax
+        {$else}
+        mov     eax, dword ptr[ecx]
+        db      $F2, $0F, $38, $F1, $02
+        mov     dword ptr[ecx], eax
+        mov     eax, dword ptr[ecx+4]
+        db      $F2, $0F, $38, $F1, $42, $04
+        mov     dword ptr[ecx+4], eax
+        mov     eax, dword ptr[ecx+8]
+        db      $F2, $0F, $38, $F1, $42, $08
+        mov     dword ptr[ecx+8], eax
+        mov     eax, dword ptr[ecx+12]
+        db      $F2, $0F, $38, $F1, $42, $0C
+        mov     dword ptr[ecx+12], eax
+        {$endif}
 end;
 {$endif CPU64}
 {$endif CPUINTEL}
@@ -60309,7 +60506,6 @@ begin
     crc32c := @crc32cfast;
   DefaultHasher := crc32c;
 end;
-
 
 initialization
   // initialization of global variables
