@@ -1501,7 +1501,7 @@ type
     /// finalize the temporary storage
     procedure Done;
     /// append some binary to the internal buffer
-    // - would raise an ESynException in case of potential overflow
+    // - will raise an ESynException in case of potential overflow
     procedure wr(const val; len: integer);
     /// append some shortstring as binary to the internal buffer
     procedure wrss(const str: shortstring);
@@ -2460,10 +2460,25 @@ type
   TSynExtended = extended;
   {$endif}
   {$endif}
+  /// the non-number values potentially stored in an IEEE floating point 
+  TSynExtendedNan = (seNumber, seNan, seInf, seNegInf);
+
+const
+  /// the JavaScript-like values of non-number IEEE constants
+  // - as recognized by ExtendedToStringNan, and used by TTextWriter.Add()
+  // when serializing such single/double/extended floating-point values
+  JSON_NAN: array[TSynExtendedNan] of string[11] = (
+    '', '"NaN"', '"Infinity"', '"-Infinity"');
 
 /// convert a floating-point value to its numerical text equivalency
 // - returns the count of chars stored into S (S[0] is not set)
 function ExtendedToString(var S: ShortString; Value: TSynExtended; Precision: integer): integer;
+
+/// check if the supplied text is NAN/INF/+INF/-INF, i.e. not a number
+// - as returned by ExtendedToString() textual conversion
+// - such values do appear as IEEE floating points, but are not defined in JSON 
+function ExtendedToStringNan(const s: shortstring): TSynExtendedNan;
+  {$ifdef HASINLINE}inline;{$endif}
 
 /// convert a floating-point value to its numerical text equivalency
 function ExtendedToStr(Value: TSynExtended; Precision: integer): RawUTF8; overload;
@@ -4354,7 +4369,7 @@ function Int64DynArrayToCSV(const Values: TInt64DynArray;
 function TIntegerDynArrayFrom(const Values: array of integer): TIntegerDynArray; 
 
 /// quick helper to initialize a dynamic array of integer from 64-bit integers
-// - would raise a ESynException if any Value[] can not fit into 32-bit, unless
+// - will raise a ESynException if any Value[] can not fit into 32-bit, unless
 // raiseExceptionOnOverflow is FALSE and the returned array slot is filled
 // with maxInt/minInt
 function TIntegerDynArrayFrom64(const Values: TInt64DynArray;
@@ -4601,7 +4616,7 @@ type
     /// initialize the wrapper with a one-dimension dynamic array
     // - this version accepts to specify how comparison should occur, using
     // TDynArrayKind  kind of first field
-    // - djNone and djCustom are too vague, and would raise an exception
+    // - djNone and djCustom are too vague, and will raise an exception
     // - no RTTI check is made over the corresponding array layout: you shall
     // ensure that the aKind parameter matches the dynamic array element definition
     // - aCaseInsensitive will be used for djRawUTF8..djSynUnicode comparison
@@ -5050,13 +5065,16 @@ type
     {$endif}
     procedure HashAdd(const Elem; aHashCode: Cardinal; var result: integer);
     /// low-level search of an element from its pre-computed hash
-    // - you should NOT use this method, but rather high-level FindHashed*()
-    function HashFind(aHashCode: cardinal; const Elem): integer; overload;
-    /// low-level search of an element from its pre-computed hash
+    // - if not found and aForAdd=true, returns -(indexofvoidfHashs[]+1)
     // - this overloaded method will return the first matching item: use the
-    // HashFind(...; const Elem) method to avoid any HashElement collision issue
+    // HashFindAndCompare(...; const Elem) method to avoid any collision issue
     // - you should NOT use this method, but rather high-level FindHashed*()
-    function HashFind(aHashCode: cardinal): integer; overload;
+    function HashFind(aHashCode: cardinal; aForAdd: boolean): integer;
+    /// low-level search of an element from its pre-computed hash
+    // - search for the hash, then use fEventCompare/fCompare/ElemEquals
+    // - if not found, returns -(indexofvoidfHashs[]+1)
+    // - you should NOT use this method, but rather high-level FindHashed*()
+    function HashFindAndCompare(aHashCode: cardinal; const Elem): integer;
     function GetHashFromIndex(aIndex: Integer): Cardinal;
     procedure HashInvalidate;
   public
@@ -5077,7 +5095,7 @@ type
     /// initialize the wrapper with a one-dimension dynamic array
     // - this version accepts to specify how both hashing and comparison should
     // occur, using TDynArrayKind  kind of first field
-    // - djNone and djCustom are too vague, and would raise an exception
+    // - djNone and djCustom are too vague, and will raise an exception
     // - no RTTI check is made over the corresponding array layout: you shall
     // ensure that the aKind parameter matches the dynamic array element definition
     // - aCaseInsensitive will be used for djRawUTF8..djSynUnicode comparison
@@ -5090,7 +5108,7 @@ type
     // the dynamic array content (e.g. in case of element deletion or update,
     // or after calling LoadFrom/Clear method) - this is not necessary after
     // FindHashedForAdding / FindHashedAndUpdate / FindHashedAndDelete methods
-    function ReHash: boolean;
+    function ReHash(forAdd: boolean=false): boolean;
     /// low-level function which would inspect the internal fHashs[] array for
     // any collision
     // - is a brute force search within fHashs[].Hash values, which may be handy
@@ -5751,6 +5769,12 @@ type
     /// search for a Name, return the associated Value as boolean
     // - returns true only if the value is exactly '1'
     function ValueBool(const aName: RawUTF8): Boolean;
+    /// search for a Name, return the associated Value as an enumerate
+    // - returns true and set aEnum if aName was found, and associated value
+    // matched an aEnumTypeInfo item
+    // - returns false if no match was found
+    function ValueEnum(const aName: RawUTF8; aEnumTypeInfo: pointer; out aEnum;
+      aEnumDefault: byte=0): boolean; overload;
     /// returns all values, as CSV or INI content
     function AsCSV(const KeySeparator: RawUTF8='=';
       const ValueSeparator: RawUTF8=#13#10; const IgnoreKey: RawUTF8=''): RawUTF8;
@@ -5765,7 +5789,8 @@ type
     // ready to be serialized as a JSON object
     // - if there is no value stored (i.e. Count=0), set null
     procedure AsDocVariant(out DocVariant: variant;
-      ExtendedJson: boolean=false; ValueAsString: boolean=true); overload;
+      ExtendedJson: boolean=false; ValueAsString: boolean=true;
+      AllowVarDouble: boolean=false); overload;
     /// compute a TDocVariant document from the stored values
     function AsDocVariant(ExtendedJson: boolean=false; ValueAsString: boolean=true): variant; overload; {$ifdef HASINLINE}inline;{$endif}
     /// merge the stored values into a TDocVariant document
@@ -5778,9 +5803,9 @@ type
     // an object with the stored values, just like AsDocVariant
     // - returns the number of updated values in the TDocVariant, 0 if
     // no value was changed
-    function MergeDocVariant(var DocVariant: variant;  
+    function MergeDocVariant(var DocVariant: variant;
       ValueAsString: boolean; ChangedProps: PVariant=nil;
-      ExtendedJson: Boolean=false): integer;
+      ExtendedJson: boolean=false; AllowVarDouble: boolean=false): integer;
     {$endif}
     /// returns true if the Init() method has been called
     function Initialized: boolean;
@@ -7232,13 +7257,20 @@ type
     // - will store e.g. '3F2504E0-4F89-11D3-9A0C-0305E82C3301'
     procedure Add(const guid: TGUID); overload;
     /// append a floating-point Value as a String
+    // - write "Infinity", "-Infinity", and "NaN" for corresponding IEEE values
     procedure AddDouble(Value: double);
+      {$ifdef HASINLINE}inline;{$endif}
     /// append a floating-point Value as a String
+    // - write "Infinity", "-Infinity", and "NaN" for corresponding IEEE values
     procedure AddSingle(Value: single);
+      {$ifdef HASINLINE}inline;{$endif}
     /// append a floating-point Value as a String
+    // - write "Infinity", "-Infinity", and "NaN" for corresponding IEEE values
     procedure Add(Value: Extended; precision: integer); overload;
     /// append a floating-point text buffer
     // - will correct on the fly '.5' -> '0.5' and '-.5' -> '-0.5'
+    // - is used when the input comes from a third-party source with no regular
+    // output, e.g. a database driver 
     procedure AddFloatStr(P: PUTF8Char);
     /// append strings or integers with a specified format
     // - % = #37 marks a string, integer, floating-point, or class parameter
@@ -7823,7 +7855,7 @@ type
     // to the generated JSON stream (for faster unserialization of huge content)
     procedure AddColumns(aKnownRowsCount: integer=0);
     /// allow to change on the fly an expanded format column layout
-    // - by definition, a non expanded format would raise a ESynException
+    // - by definition, a non expanded format will raise a ESynException
     // - caller should then set ColNames[] and run AddColumns()
     procedure ChangeExpandedFields(aWithID: boolean; const aFields: TSQLFieldIndexDynArray); overload;
     /// end the serialized JSON object
@@ -8547,7 +8579,10 @@ type
   protected
     fKeys: TDynArrayHashed;
     fValues: TDynArray;
+    fTimeOut: TCardinalDynArray;
+    fTimeOuts: TDynArray;
     function InArray(const aKey,aArrayValue; aAction: TSynDictionaryInArray): boolean;
+    procedure SetTimeouts;
   public
     /// initialize the dictionary storage, for a given dynamic array value
     // - aKeyTypeInfo should be a dynamic array TypeInfo() RTTI pointer, which
@@ -8556,8 +8591,10 @@ type
     // would store the values within this TSynDictionary instance
     // - by default, string keys would be searched following exact case, unless
     // aKeyCaseInsensitive is TRUE
+    // - you can set an optional timeout period, in seconds - you should call
+    // DeleteDeprecated periodically to search for deprecated items
     constructor Create(aKeyTypeInfo,aValueTypeInfo: pointer;
-      aKeyCaseInsensitive: boolean=false); reintroduce; virtual;
+      aKeyCaseInsensitive: boolean=false; aTimeoutSeconds: cardinal=0); reintroduce; virtual;
     /// finalize the storage
     // - would release all internal stored values
     destructor Destroy; override;
@@ -8583,6 +8620,9 @@ type
     // - returns the index of the deleted item, -1 if aKey was not found
     // - this method is thread-safe, since it would lock the instance
     function Delete(const aKey): integer;
+    /// search and delete all deprecated items according to TimeoutSeconds
+    // - returns how many items have been deleted
+    function DeleteDeprecated: integer;
     /// search of a primary key within the internal hashed dictionary
     // - returns the index of the matching item, -1 if aKey was not found
     // - if you want to access the value, you should use fSafe.Lock/Unlock:
@@ -8591,6 +8631,7 @@ type
     /// search of a stored value by its primary key, and return a local copy
     // - so this method is thread-safe
     // - returns TRUE if aKey was found, FALSE if no match exists
+    // - will update the associated timeout value of the entry, if applying
     function FindAndCopy(const aKey; out aValue): boolean;
     /// search for a primary key presence
     // - returns TRUE if aKey was found, FALSE if no match exists
@@ -8672,6 +8713,9 @@ type
     /// returns how many items are currently stored in this dictionary
     // - this method is thread-safe
     function Count: integer;
+    /// after how many seconds entries are deprecated
+    // - to be processed on request by DeleteDeprecated
+    function TimeoutSeconds: cardinal;
     /// direct access to the primary key identifiers
     // - if you want to access the keys, you should use fSafe.Lock/Unlock
     property Keys: TDynArrayHashed read fKeys;
@@ -10343,6 +10387,20 @@ procedure Base64ToBin(sp: PAnsiChar; len: PtrInt; var result: TSynTempBuffer); o
 function Base64ToBin(base64, bin: PAnsiChar; base64len, binlen: PtrInt;
   nofullcheck: boolean=true): boolean; overload;
 
+/// fast conversion from Base64 encoded text into binary data
+// - will check supplied text is a valid Base64 encoded stream
+function Base64ToBinSafe(const s: RawByteString): RawByteString; overload;
+  {$ifdef HASINLINE}inline;{$endif}
+
+/// fast conversion from Base64 encoded text into binary data
+// - will check supplied text is a valid Base64 encoded stream
+function Base64ToBinSafe(sp: PAnsiChar; len: PtrInt): RawByteString; overload;
+  {$ifdef HASINLINE}inline;{$endif}
+
+/// fast conversion from Base64 encoded text into binary data
+// - will check supplied text is a valid Base64 encoded stream
+function Base64ToBinSafe(sp: PAnsiChar; len: PtrInt; var data: RawByteString): boolean; overload;
+
 /// just a wrapper around Base64ToBin() for in-place decode of JSON_BASE64_MAGIC
 // '\uFFF0base64encodedbinary' content into binary
 // - input ParamValue shall have been checked to match the expected pattern
@@ -10376,8 +10434,13 @@ function BinToBase64Length(len: PtrUInt): PtrUInt;
   {$ifdef HASINLINE}inline;{$endif}
 
 /// retrieve the expected undecoded length of a Base64 encoded buffer
-// - here len is the number 16 bytes in sp
+// - here len is the number of bytes in sp
 function Base64ToBinLength(sp: PAnsiChar; len: PtrInt): PtrInt;
+
+/// retrieve the expected undecoded length of a Base64 encoded buffer
+// - here len is the number of bytes in sp
+// - will check supplied text is a valid Base64 encoded stream
+function Base64ToBinLengthSafe(sp: PAnsiChar; len: PtrInt): PtrInt;
 
 /// direct low-level decoding of a Base64 encoded buffer
 // - here len is the number of 16 bytes chunks in sp
@@ -12089,6 +12152,17 @@ procedure SetExecutableVersion(aMajor,aMinor,aRelease,aBuild: integer); overload
 // - e.g. SetExecutableVersion('7.1.2.512');
 procedure SetExecutableVersion(const aVersionText: RawUTF8); overload;
 
+type
+  /// identify an operating system folder
+  TSystemPath = (spCommonData, spUserData, spCommonDocuments, spUserDocuments);
+
+/// returns an operating system folder
+// - will return the full path of a given kind of private or shared folder,
+// depending on the underlying operating system
+// - will use SHGetFolderPath and the corresponding CSIDL constant under Windows
+// - will return the $HOME folder (whatever kind value is given) otherwise
+function GetSystemPath(kind: TSystemPath): TFileName;
+
 /// self-modifying code - change some memory buffer in the code segment
 // - if Backup is not nil, it should point to a Size array of bytes, ready
 // to contain the overridden code buffer, for further hook disabling
@@ -13267,9 +13341,8 @@ type
   // variant level: for consistency, "aVariant.AB := aValue" will replace
   // any previous value for the name "AB"
   // - dvoReturnNullForUnknownProperty will be used when retrieving any value
-  // from its name (for dvObject kind of instance)
-  // - dvoReturnNullForOutOfRangeIndex  will be used when retrieving any value
-  // from its index (for dvArray or dvObject kind of instance)
+  // from its name (for dvObject kind of instance), or index (for dvArray or
+  // dvObject kind of instance)
   // - by default, internal values will be copied by-value from one variant
   // instance to another, to ensure proper safety - but it may be too slow:
   // if you set dvoValueCopiedByReference, the internal
@@ -13292,11 +13365,15 @@ type
   // http://docs.mongodb.org/manual/reference/mongodb-extended-json and with
   // TDocVariant JSON unserialization, also our SynCrossPlatformJSON unit, but
   // NOT recognized by most JSON clients, like AJAX/JavaScript or C#/Java
+  // - by default, only integer/Int64/currency number values are allowed, unless
+  // dvoAllowDoubleValue is set and 32-bit floating-point conversion is tried,
+  // with potential loss of precision during the conversion 
   TDocVariantOption =
     (dvoNameCaseSensitive, dvoCheckForDuplicatedNames,
-     dvoReturnNullForUnknownProperty, dvoReturnNullForOutOfRangeIndex,
+     dvoReturnNullForUnknownProperty,
      dvoValueCopiedByReference, dvoJSONParseDoNotTryCustomVariants,
-     dvoJSONObjectParseWithinString, dvoSerializeAsExtendedJson);
+     dvoJSONObjectParseWithinString, dvoSerializeAsExtendedJson,
+     dvoAllowDoubleValue);
 
   /// set of options for a TDocVariant storage
   // - you can use JSON_OPTIONS[true] if you want to create a fast by-reference
@@ -13507,14 +13584,15 @@ function VariantSaveJSONLength(const Value: variant; Escape: TTextWriterKind=twJ
 /// low-level function to set a variant from an unescaped JSON number or string
 // - expect the JSON input buffer to be already unescaped, e.g. by GetJSONField()
 // - is called e.g. by function VariantLoadJSON()
-// - will instantiate either an Integer, Int64, currency, double or string value
-// (as RawUTF8), guessing the best numeric type according to the textual content,
-// and string in all other cases, except TryCustomVariants points to some options
-// (e.g. @JSON_OPTIONS[true] for fast instance) and input is a known object or
-// array, either encoded as strict-JSON (i.e. {..} or [..]), or with some
-// extended (e.g. BSON) syntax
+// - will instantiate either an Integer, Int64, currency, double (if AllowDouble
+// is true or dvoAllowDoubleValue is in TryCustomVariants^) or string value (as
+// RawUTF8), guessing the best numeric type according to the textual content,
+//  and string in all other cases, except if TryCustomVariants points to some
+// options (e.g. @JSON_OPTIONS[true] for fast instance) and input is a known
+// object or array, either encoded as strict-JSON (i.e. {..} or [..]),
+// or with some extended (e.g. BSON) syntax
 procedure GetVariantFromJSON(JSON: PUTF8Char; wasString: Boolean; var Value: variant;
-  TryCustomVariants: PDocVariantOptions=nil);
+  TryCustomVariants: PDocVariantOptions=nil; AllowDouble: boolean=false);
 
 /// identify either varInt64, varDouble, varCurrency types following JSON format
 // - any non valid number is returned as varString
@@ -13522,11 +13600,22 @@ procedure GetVariantFromJSON(JSON: PUTF8Char; wasString: Boolean; var Value: var
 // - warning: supplied JSON is expected to be not nil
 function TextToVariantNumberType(JSON: PUTF8Char): word;
 
+/// identify either varInt64 or varCurrency types following JSON format
+// - this version won't return varDouble, i.e. won't handle more than 4 exact
+// decimals (as varCurrency), nor scientific notation with exponent (1.314e10)
+// - this will ensure that any incoming JSON will converted back with its exact
+// textual representation, without digit truncation due to limited precision 
+// - any non valid number is returned as varString
+// - is used e.g. by GetVariantFromJSON() to guess the destination variant type
+// - warning: supplied JSON is expected to be not nil
+function TextToVariantNumberTypeNoDouble(JSON: PUTF8Char): word;
+
 /// low-level function to set a numerical variant from an unescaped JSON number
-// - returns TRUE if TextToVariantNumberType(JSON) identified it as a number,
-// and set Value to the corresponding content
+// - returns TRUE if TextToVariantNumberType/TextToVariantNumberTypeNoDouble(JSON)
+// identified it as a number and set Value to the corresponding content
 // - returns FALSE if JSON is a string, or null/true/false
-function GetNumericVariantFromJSON(JSON: PUTF8Char; var Value: TVarData): boolean;
+function GetNumericVariantFromJSON(JSON: PUTF8Char; var Value: TVarData;
+  AllowVarDouble: boolean): boolean;
 
 /// convert an UTF-8 encoded text buffer into a variant RawUTF8 varString
 procedure RawUTF8ToVariant(Txt: PUTF8Char; TxtLen: integer; var Value: variant); overload;
@@ -14293,13 +14382,13 @@ type
       aCaseSensitive: boolean; var Dest: variant; DestByRef: boolean); overload;
     /// retrieve an item in this document from its index, and returns its value
     // - raise an EDocVariant if the supplied Index is not in the 0..Count-1
-    // range and dvoReturnNullForOutOfRangeIndex is set in Options
+    // range and dvoReturnNullForUnknownProperty is set in Options
     // - create a copy of the variant by default, unless DestByRef is TRUE
     procedure RetrieveValueOrRaiseException(Index: integer;
      var Dest: variant; DestByRef: boolean); overload;
     /// retrieve an item in this document from its index, and returns its Name
     // - raise an EDocVariant if the supplied Index is not in the 0..Count-1
-    // range and dvoReturnNullForOutOfRangeIndex is set in Options
+    // range and dvoReturnNullForUnknownProperty is set in Options
     procedure RetrieveNameOrRaiseException(Index: integer; var Dest: RawUTF8);
     /// set an item in this document from its index
     // - raise an EDocVariant if the supplied Index is not in 0..Count-1 range
@@ -14331,9 +14420,11 @@ type
       wasAdded: PBoolean=nil; OnlyAddMissing: boolean=false): integer;
     /// add a value in this document, from its text representation
     // - this function expects a UTF-8 text for the value, which would be
-    // converted to a variant number, if possible
+    // converted to a variant number, if possible (as varInt/varInt64/varCurrency
+    // unless AllowVarDouble is set)
     // - if Update=TRUE, will set the property, even if it is existing
-    function AddValueFromText(const aName,aValue: RawUTF8; Update: boolean=false): integer;
+    function AddValueFromText(const aName,aValue: RawUTF8; Update: boolean=false;
+      AllowVarDouble: boolean=false): integer;
     /// add some properties to a TDocVariantData dvObject
     // - data is supplied two by two, as Name,Value pairs
     // - caller should ensure that VKind=dvObject, otherwise it won't do anything
@@ -14362,10 +14453,12 @@ type
     function AddItem(const aValue: variant): integer;
     /// add a value to this document, handled as array, from its text representation
     // - this function expects a UTF-8 text for the value, which would be
-    // converted to a variant number, if possible
+    // converted to a variant number, if possible (as varInt/varInt64/varCurrency
+    // unless AllowVarDouble is set)
     // - if instance's Kind is dvObject, it will raise an EDocVariant exception
     // - returns the index of the corresponding newly added item
-    function AddItemFromText(const aValue: RawUTF8): integer;
+    function AddItemFromText(const aValue: RawUTF8;
+      AllowVarDouble: boolean=false): integer;
     /// add one or several values to this document, handled as array
     // - if instance's Kind is dvObject, it will raise an EDocVariant exception
     procedure AddItems(const aValue: array of const);
@@ -14516,8 +14609,8 @@ type
     // string, which is not found within the object property names and
     // dvoReturnNullForUnknownProperty is set in Options
     // - raise an EDocVariant if Kind is dvArray and if aNameOrIndex is a
-    // integer, which is not within 0..Count-1 and
-    // dvoReturnNullForOutOfRangeIndex is set in Options
+    // integer, which is not within 0..Count-1 and dvoReturnNullForUnknownProperty
+    // is set in Options
     // - so you can use directly:
     // ! // for an array document:
     // ! aVariant := TDocVariant.NewArray(['one',2,3.0]);
@@ -14612,7 +14705,7 @@ type
     /// direct access to a dvArray's TDocVariant property from its index
     // - simple values may directly use Values[] dynamic array, but to access
     // a TDocVariantData members, this property is safer
-    // - follows dvoReturnNullForOutOfRangeIndex option to raise an exception
+    // - follows dvoReturnNullForUnknownProperty option to raise an exception
     // - _[ndx] would return a fake void TDocVariant if aIndex is out of range,
     // if the property is not existing or not a TDocVariantData (just like
     // GetAsDocVariantSafe)
@@ -15889,6 +15982,7 @@ type
     /// finalize the mutex
     destructor Destroy; override;
     /// will enter the mutex until the IUnknown reference is released
+    // - as expected by IAutoLocker interface
     // - could be used as such under Delphi:
     // !begin
     // !  ... // unsafe code
@@ -15912,6 +16006,7 @@ type
     // !end;
     function ProtectMethod: IUnknown;
     /// enter the mutex
+    // - as expected by IAutoLocker interface
     // - any call to Enter should be ended with a call to Leave, and
     // protected by a try..finally block, as such:
     // !begin
@@ -15925,9 +16020,14 @@ type
     // !end;
     procedure Enter; virtual;
     /// leave the mutex
+    // - as expected by IAutoLocker interface
     procedure Leave; virtual;
     /// access to the locking methods of this instance
+    // - as expected by IAutoLocker interface
     function Safe: PSynLocker;
+    /// direct access to the locking methods of this instance
+    // - faster than IAutoLocker.Safe function
+    property Locker: TSynLocker read fSafe;
   end;
 
   /// the current state of a TBlockingProcess instance
@@ -16115,7 +16215,7 @@ type
     function ToJSON(HumanReadable: boolean=false): RawUTF8;
     /// the document fields would be safely accessed via this property
     // - this is the main entry point of this storage
-    // - would raise an EDocVariant exception if Name does not exist at reading
+    // - will raise an EDocVariant exception if Name does not exist at reading
     // - implementation class would make a thread-safe copy of the variant value
     property Value[const Name: RawUTF8]: Variant read GetValue write SetValue; default;
   end;
@@ -16178,7 +16278,7 @@ type
     // - implemented as just a wrapper around VariantSaveJSON()
     function ToJSON(HumanReadable: boolean=false): RawUTF8;
     /// the document fields would be safely accessed via this property
-    // - would raise an EDocVariant exception if Name does not exist
+    // - will raise an EDocVariant exception if Name does not exist
     // - result variant is returned as a copy, not as varByRef, since a copy
     // will definitively be more thread safe
     property Value[const Name: RawUTF8]: Variant read GetValue write SetValue; default;
@@ -16467,11 +16567,11 @@ type
     /// finalize the authentation
     destructor Destroy; override;
     /// register one credential for a given user
-    // - this abstract method would raise an exception: inherited classes should
+    // - this abstract method will raise an exception: inherited classes should
     // implement them as expected
     procedure AuthenticateUser(const aName, aPassword: RawUTF8); virtual;
     /// unregister one credential for a given user
-    // - this abstract method would raise an exception: inherited classes should
+    // - this abstract method will raise an exception: inherited classes should
     // implement them as expected
     procedure DisauthenticateUser(const aName: RawUTF8); virtual;
     /// create a new session
@@ -23054,6 +23154,21 @@ begin
 {$endif EXTENDEDTOSTRING_USESTR}
 end;
 
+function ExtendedToStringNan(const s: shortstring): TSynExtendedNan;
+begin
+  case PInteger(@s)^ and $ffdfdfdf of
+    3+ord('N')shl 8+ord('A')shl 16+ord('N')shl 24:
+      result := seNan;
+    3+ord('I')shl 8+ord('N')shl 16+ord('F')shl 24,
+    4+ord('+')shl 8+ord('I')shl 16+ord('N')shl 24:
+      result := seInf;
+    4+ord('-')shl 8+ord('I')shl 16+ord('N')shl 24:
+      result := seNegInf;
+    else
+      result := seNumber;
+  end;
+end;
+
 function ExtendedToStr(Value: TSynExtended; Precision: integer): RawUTF8;
 var tmp: ShortString;
 begin
@@ -25199,12 +25314,24 @@ begin
   result := IsBase64(pointer(s),length(s));
 end;
 
+function Base64ToBinLengthSafe(sp: PAnsiChar; len: PtrInt): PtrInt;
+begin
+  if IsBase64(sp,len) then begin
+    if ConvertBase64ToBin[sp[len-2]]>=0 then
+      if ConvertBase64ToBin[sp[len-1]]>=0 then
+        result := 0 else
+        result := 1 else
+        result := 2;
+    result := (len shr 2)*3-result;
+  end else
+    result := 0;
+end;
+
 function Base64ToBinLength(sp: PAnsiChar; len: PtrInt): PtrInt;
 begin
-  if (len=0) or (len and 3<>0) then begin
-    result := 0;
+  result := 0;
+  if (len=0) or (len and 3<>0) then
     exit;
-  end;
   if ConvertBase64ToBin[sp[len-2]]>=0 then
     if ConvertBase64ToBin[sp[len-1]]>=0 then
       result := 0 else
@@ -25340,7 +25467,36 @@ begin
   end;
 end;
 
-procedure Base64ToBin(sp: PAnsiChar; len: PtrInt; var result: TSynTempBuffer); overload;
+function Base64ToBinSafe(const s: RawByteString): RawByteString;
+var len, resultLen: PtrInt;
+begin
+  len := length(s);
+  resultLen := Base64ToBinLengthSafe(pointer(s),len);
+  if resultLen=0 then
+    result := '' else begin
+    SetString(result,nil,resultLen);
+    Base64Decode(pointer(s),pointer(result),len shr 2);
+  end;
+end;
+
+function Base64ToBinSafe(sp: PAnsiChar; len: PtrInt): RawByteString;
+begin
+  Base64ToBinSafe(sp,len,result);
+end;
+
+function Base64ToBinSafe(sp: PAnsiChar; len: PtrInt; var data: RawByteString): boolean;
+var datalen: PtrInt;
+begin
+  datalen := Base64ToBinLengthSafe(sp,len);
+  if datalen=0 then
+    result := false else begin
+    SetString(data,nil,datalen);
+    Base64Decode(sp,pointer(data),len shr 2);
+    result := true;
+  end;
+end;
+
+procedure Base64ToBin(sp: PAnsiChar; len: PtrInt; var result: TSynTempBuffer);
 var resultLen: PtrInt;
 begin
   resultLen := Base64ToBinLength(sp,len);
@@ -25359,7 +25515,6 @@ begin
   if result then
     Base64Decode(base64,bin,base64len shr 2);
 end;
-
 
 function BinToSource(const ConstName, Comment: RawUTF8;
   Data: pointer; Len, PerLine: integer; const Suffix: RawUTF8): RawUTF8;
@@ -30615,26 +30770,26 @@ asm
         lea     eax, [ebx+61C8864FH]
         mov     ebp, edx
 @1:     mov     edx, dword ptr [ecx]
-        imul    edx, -2048144777
+        imul    edx, edx, -2048144777
         add     edi, edx
         rol     edi, 13
-        imul    edi, -1640531535
+        imul    edi, edi, -1640531535
         mov     edx, dword ptr [ecx+4]
-        imul    edx, -2048144777
+        imul    edx, edx, -2048144777
         add     esi, edx
         rol     esi, 13
-        imul    esi, -1640531535
+        imul    esi, esi, -1640531535
         mov     edx, dword ptr [ecx+8]
-        imul    edx, -2048144777
+        imul    edx, edx, -2048144777
         add     ebx, edx
         rol     ebx, 13
-        imul    ebx, -1640531535
+        imul    ebx, ebx, -1640531535
         mov     edx, dword ptr [ecx+12]
         lea     ecx, [ecx+16]
-        imul    edx, -2048144777
+        imul    edx, edx, -2048144777
         add     eax, edx
         rol     eax, 13
-        imul    eax, -1640531535
+        imul    eax, eax, -1640531535
         cmp     ebp, ecx
         jnc     @1
         rol     edi, 1
@@ -30964,8 +31119,33 @@ end;
 
 procedure crcblocks(crc128, data128: PBlock128; count: integer);
 begin
+  {$ifdef CPUX86}
+  if (cfSSE42 in CpuFeatures) and (count>0) then
+  asm
+        mov     ecx, crc128
+        mov     edx, data128
+@s:     mov     eax, dword ptr[ecx]
+        db      $F2, $0F, $38, $F1, $02
+        mov     dword ptr[ecx], eax
+        mov     eax, dword ptr[ecx+4]
+        db      $F2, $0F, $38, $F1, $42, $04
+        mov     dword ptr[ecx+4], eax
+        mov     eax, dword ptr[ecx+8]
+        db      $F2, $0F, $38, $F1, $42, $08
+        mov     dword ptr[ecx+8], eax
+        mov     eax, dword ptr[ecx+12]
+        db      $F2, $0F, $38, $F1, $42, $0C
+        mov     dword ptr[ecx+12], eax
+        dec     count
+        lea     edx, [edx+16]
+        jnz @s
+  end else
+  while count>0 do begin
+    crcblockpas(crc128,data128);
+  {$else}
   while count>0 do begin
     crcblock(crc128,data128);
+  {$endif CPUX86}
     inc(data128);
     dec(count);
   end;
@@ -32425,7 +32605,7 @@ end;
 procedure TSynTimeZone.LoadFromBuffer(const Buffer: RawByteString);
 begin
   fZones.LoadFrom(pointer(SynLZDecompress(Buffer)));
-  fZones.ReHash;
+  fZones.ReHash(false);
   FreeAndNil(fIds);
   FreeAndNil(fDisplays);
 end;
@@ -33310,7 +33490,7 @@ begin
   L := ord(PS^);
   inc(PS);
   while (L>0) and (PS^ in ['a'..'z']) do begin inc(PS); dec(L); end;
-  tmp[L] := #0; // GetCaptionFromPCharLen expect
+  tmp[L] := #0; // as expected by GetCaptionFromPCharLen/UnCamelCase
   MoveFast(PS^,tmp,L);
   GetCaptionFromPCharLen(tmp,result);
 end;
@@ -34234,6 +34414,47 @@ begin
       DateTimeToIso8601(Version.BuildDateTime,True,' ')],ProgramFullSpec);
   end;
 end;
+
+{$ifdef MSWINDOWS}
+// avoid unneeded reference to ShlObj.pas
+function SHGetFolderPath(hwnd: HWND; csidl: Integer; hToken: THandle;
+  dwFlags: DWord; pszPath: PChar): HRESULT; stdcall; external 'SHFolder.dll'
+  name {$ifdef UNICODE}'SHGetFolderPathW'{$else}'SHGetFolderPathA'{$endif};
+
+var
+  _SystemPath: array[TSystemPath] of TFileName;
+  
+function GetSystemPath(kind: TSystemPath): TFileName;
+const
+  CSIDL_PERSONAL = $0005;
+  CSIDL_LOCAL_APPDATA = $001C; // local non roaming user folder
+  CSIDL_COMMON_APPDATA = $0023;
+  CSIDL_COMMON_DOCUMENTS = $002E;
+  CSIDL: array[TSystemPath] of integer = (
+  // spCommonData, spUserData, spCommonDocuments, spUserDocuments
+    CSIDL_COMMON_APPDATA, CSIDL_LOCAL_APPDATA,
+    CSIDL_COMMON_DOCUMENTS, CSIDL_PERSONAL);
+var tmp: array[0..MAX_PATH] of char;
+    k: TSystemPath;
+begin
+  if _SystemPath[spCommonData]='' then
+    for k := low(k) to high(k) do
+      if SHGetFolderPath(0,CSIDL[k],0,0,@tmp)=S_OK then
+        _SystemPath[k] := IncludeTrailingPathDelimiter(tmp) else
+        _SystemPath[k] := IncludeTrailingPathDelimiter(GetEnvironmentVariable('APPDATA'));
+  result := _SystemPath[kind];
+end;
+{$else MSWINDOWS}
+var
+  _HomePath: TFileName;
+
+function GetSystemPath(kind: TSystemPath): TFileName;
+begin
+  if _HomePath='' then
+    _HomePath := IncludeTrailingPathDelimiter(GetEnvironmentVariable('HOME'));
+  result := _HomePath;
+end;
+{$endif MSWINDOWS}
 
 {$ifdef DARWIN}
 function mprotect(Addr: Pointer; Len: size_t; Prot: Integer): Integer;
@@ -39025,8 +39246,45 @@ begin
       ProcessSimple(GetJSONField(JSON,JSON,@wasString,EndOfObject));
 end;
 
+function TextToVariantNumberTypeNoDouble(JSON: PUTF8Char): word;
+var start: PUTF8Char;
+begin
+  start := json;
+  if (json[0] in ['1'..'9']) or // is first char numeric?
+     ((json[0]='0') and not (json[1] in ['0'..'9'])) or // '012' is invalid JSON
+     ((json[0]='-') and (json[1] in ['0'..'9'])) then begin
+    inc(json);
+    repeat
+      case json^ of
+      '0'..'9':
+        inc(json);
+      '.':
+        if (json[1] in ['0'..'9']) and (json[2] in [#0,'0'..'9']) then
+          if (json[2]=#0) or (json[3]=#0) or
+             ((json[3] in ['0'..'9']) and
+              (json[4]=#0) or
+              ((json[4] in ['0'..'9']) and (json[5]=#0))) then begin
+            result := varCurrency; // currency ###.1234 number
+            exit;
+          end else
+            break else // we expect exact digit representation
+          break;
+      #0:
+        if json-start<=19 then begin // signed Int64 precision
+          result := varInt64;
+          exit;
+        end else
+          break;
+      else break;
+      end;
+    until false;
+  end;
+  result := varString;
+end;
+
 function TextToVariantNumberType(json: PUTF8Char): word;
 var start: PUTF8Char;
+    exp,err: integer;
 label exponent;
 begin
   start := json;
@@ -39050,19 +39308,18 @@ begin
             repeat // more than 4 decimals
               inc(json)
             until not (json^ in ['0'..'9']);
-            if json^ in ['e','E'] then begin
-exponent:     inc(json);
-              if json^ in ['+','-'] then
-                inc(json);
-              if not (json^ in ['0'..'9']) then
-                break;
-              repeat
-                inc(json);
-              until not (json^ in ['0'..'9']);
-            end;
-            if json^=#0 then begin
-              result := varDouble; // (floating pointer number)
+            case json^ of
+            #0: begin
+              result := varDouble;
               exit;
+            end;
+            'e','E': begin
+exponent:     exp := GetInteger(json+1,err);
+              if (err=0) and (exp>-324) and (exp<308) then begin
+                result := varDouble; // 5.0 x 10^-324 .. 1.7 x 10^308
+                exit;
+              end;
+            end;
             end;
             break;
           end else
@@ -39084,17 +39341,26 @@ exponent:     inc(json);
   result := varString;
 end;
 
-function GetNumericVariantFromJSON(JSON: PUTF8Char; var Value: TVarData): boolean;
+function GetNumericVariantFromJSON(JSON: PUTF8Char; var Value: TVarData;
+  AllowVarDouble: boolean): boolean;
 var err: integer;
+    typ: word;
 label dbl;
 begin
-  if JSON<>nil then
+  if JSON<>nil then begin
+    if AllowVarDouble then
+      typ := TextToVariantNumberType(JSON) else
+      typ := TextToVariantNumberTypeNoDouble(JSON);
     with Value do
-    case TextToVariantNumberType(JSON) of
+    case typ of
     varInt64: begin
       VInt64 := GetInt64(JSON,err);
-      if err<>0 then
-        goto dbl; // overflow (>$7FFFFFFFFFFFFFFF) -> try floating point
+      if err<>0 then // overflow (>$7FFFFFFFFFFFFFFF) -> try floating point
+        if AllowVarDouble then
+          goto dbl else begin
+          result:= false;
+          exit;
+        end;
       if (VInt64<=high(integer)) and (VInt64>=low(integer)) then
         VType := varInteger else
         VType := varInt64;
@@ -39116,18 +39382,21 @@ dbl:  VDouble := GetExtended(JSON,err);
       end;
     end;
     end;
+  end;
   result := false;
 end;
 
 procedure GetVariantFromJSON(JSON: PUTF8Char; wasString: Boolean; var Value: variant;
-  TryCustomVariants: PDocVariantOptions);
+  TryCustomVariants: PDocVariantOptions; AllowDouble: boolean);
 begin
   // first handle any strict-JSON syntax objects or arrays into custom variants
   // (e.g. when called directly from TSQLPropInfoRTTIVariant.SetValue)
-  if (TryCustomVariants<>nil) and (JSON<>nil) and (JSON^ in ['{','[']) then begin
-    GetJSONToAnyVariant(Value,JSON,nil,TryCustomVariants);
-    exit;
-  end;
+  if (TryCustomVariants<>nil) and (JSON<>nil) then
+    if JSON^ in ['{','['] then begin
+      GetJSONToAnyVariant(Value,JSON,nil,TryCustomVariants);
+      exit;
+    end else
+    AllowDouble := dvoAllowDoubleValue in TryCustomVariants^;
   // handle simple text or numerical values
   with TVarData(Value) do begin
     if VType and VTYPE_STATIC=0 then
@@ -39149,7 +39418,7 @@ begin
       exit;
     end else
     if not wasString then
-      if GetNumericVariantFromJSON(JSON,TVarData(Value)) then
+      if GetNumericVariantFromJSON(JSON,TVarData(Value),AllowDouble) then
         exit;
     // found no numerical value -> return a string in the expected format
     VType := varString;
@@ -39915,7 +40184,8 @@ begin
   result := AddValue(tmp,aValue);
 end;
 
-function TDocVariantData.AddValueFromText(const aName,aValue: RawUTF8; Update: boolean): integer;
+function TDocVariantData.AddValueFromText(const aName,aValue: RawUTF8;
+  Update, AllowVarDouble: boolean): integer;
 begin
   if aName='' then begin
     result := -1;
@@ -39927,7 +40197,8 @@ begin
   if result<0 then
     result := InternalAdd(aName);
   VarClear(VValue[result]);
-  if not GetNumericVariantFromJSON(pointer(aValue),TVarData(VValue[result])) then
+  if not GetNumericVariantFromJSON(pointer(aValue),TVarData(VValue[result]),
+      AllowVarDouble) then
     RawUTF8ToVariant(aValue,VValue[result]);
 end;
 
@@ -39968,10 +40239,12 @@ begin
   SetVariantByValue(aValue,VValue[result]);
 end;
 
-function TDocVariantData.AddItemFromText(const aValue: RawUTF8): integer;
+function TDocVariantData.AddItemFromText(const aValue: RawUTF8;
+  AllowVarDouble: boolean): integer;
 begin
   result := InternalAdd(''); // FPC does not allow VValue[InternalAdd(aName)]
-  if not GetNumericVariantFromJSON(pointer(aValue),TVarData(VValue[result])) then
+  if not GetNumericVariantFromJSON(pointer(aValue),TVarData(VValue[result]),
+      AllowVarDouble) then
     RawUTF8ToVariant(aValue,VValue[result]);
 end;
 
@@ -40703,7 +40976,7 @@ procedure TDocVariantData.RetrieveNameOrRaiseException(Index: integer;
   var Dest: RawUTF8);
 begin
   if (cardinal(Index)>=cardinal(VCount)) or (VName=nil) then
-    if dvoReturnNullForOutOfRangeIndex in VOptions then
+    if dvoReturnNullForUnknownProperty in VOptions then
       Dest := '' else
       raise EDocVariant.CreateUTF8('Out of range Names[%] (count=%)',[Index,VCount]) else
       Dest := VName[Index];
@@ -40714,7 +40987,7 @@ procedure TDocVariantData.RetrieveValueOrRaiseException(Index: integer;
 var Source: PVariant;
 begin
   if cardinal(Index)>=cardinal(VCount) then
-    if dvoReturnNullForOutOfRangeIndex in VOptions then
+    if dvoReturnNullForUnknownProperty in VOptions then
       SetVariantNull(Dest) else
       raise EDocVariant.CreateUTF8('Out of range Values[%] (count=%)',[Index,VCount]) else
     if DestByRef then
@@ -41063,7 +41336,7 @@ function TDocVariantData.GetAsDocVariantByIndex(aIndex: integer): PDocVariantDat
 begin
   if cardinal(aIndex)<cardinal(VCount) then
     result := _Safe(VValue[aIndex]) else
-    if dvoReturnNullForOutOfRangeIndex in VOptions then
+    if dvoReturnNullForUnknownProperty in VOptions then
       result := @DocVariantDataFake else
       raise EDocVariant.CreateUTF8('Out of range _[%] (count=%)',[aIndex,VCount]);
 end;
@@ -44211,7 +44484,7 @@ begin
   if (fHashs<>nil) and Assigned(fHashElement) then begin
     if aHashCode=0 then
       aHashCode := fHashElement(Elem,fHasher);
-    result := HashFind(aHashCode,Elem);
+    result := HashFindAndCompare(aHashCode,Elem);
     if result<0 then
       result := -1; // for coherency with most methods
   end else begin
@@ -44236,11 +44509,11 @@ begin
   {$ifdef UNDIRECTDYNARRAY}with InternalDynArray do{$endif} begin
     // fHashs[] is too small -> recreate
     if fCountP<>nil then
-      dec(fCountP^); // don't rehash the latest entry (which may not be set)
+      dec(fCountP^); // ignore latest entry (which is not filled yet)
     ReHash;
     if fCountP<>nil then
       inc(fCountP^);
-    result := HashFind(aHashCode,Elem); // fHashs[] has changed -> recompute
+    result := HashFind(aHashCode,true); // fHashs[] has changed -> recompute
     assert(result<0);
   end;
   with fHashs[-result-1] do begin // HashFind returned negative index in fHashs[]
@@ -44258,7 +44531,7 @@ begin
   if n<fHashCountTrigger then begin
     result := Scan(Elem);
     if result<0 then begin
-      SetCount(n+1); // like HashAdd(): reserve space for added item
+      SetCount(n+1); // reserve space for added item, as in HashAdd()
       result := n;
       wasadded := true;
     end else
@@ -44266,12 +44539,12 @@ begin
     exit;
   end;
   if fHashs=nil then
-    ReHash; // compute hash of all previously added fHashCountTrigger items
+    ReHash(true); // compute hash of all previously added fHashCountTrigger items
   if (aHashCode=0) and Assigned(fHashElement) then
     aHashCode := fHashElement(Elem,fHasher);
   if aHashCode=HASH_VOID then
     aHashCode := HASH_ONVOIDCOLISION; // as in HashFind() -> for HashAdd() below
-  result := HashFind(aHashCode,Elem);
+  result := HashFindAndCompare(aHashCode,Elem);
   if result>=0 then
     // found matching existing item
     wasAdded := false else begin
@@ -44324,7 +44597,7 @@ begin
   if fHashs=nil then // Count<fHashCountTrigger
     result := Scan(ElemToFill) else
     if Assigned(fHashElement) then begin
-      result := HashFind(fHashElement(ElemToFill,fHasher),ElemToFill);
+      result := HashFindAndCompare(fHashElement(ElemToFill,fHasher),ElemToFill);
       if result<0 then
         result := -1;
     end else
@@ -44354,7 +44627,7 @@ h:if Assigned(fHashElement) then begin
     aHashCode := fHashElement(Elem,fHasher);
     if aHashCode=HASH_VOID then
       aHashCode := HASH_ONVOIDCOLISION; // as in HashFind() -> for HashAdd() below
-    result := HashFind(aHashCode,Elem);
+    result := HashFindAndCompare(aHashCode,Elem);
     if result<0 then
       if AddIfNotExisting then begin
         // not existing -> add as new element
@@ -44378,7 +44651,7 @@ begin
       Delete(result);
   end else
   if Assigned(fHashElement) then begin
-    result := HashFind(fHashElement(Elem,fHasher),Elem);
+    result := HashFindAndCompare(fHashElement(Elem,fHasher),Elem);
     if result<0 then
       result := -1 else begin
       Delete(result);
@@ -44559,8 +44832,9 @@ begin
   end;
   fHashElement := aHashElement;
   {$ifdef UNDIRECTDYNARRAY}InternalDynArray.{$endif}fCompare := aCompare;
-  HashInvalidate;
   fHashCountTrigger := 32;
+  fHashs := nil; // = HashInvalidate;
+  fHashFindCount := 0;
 end;
 
 procedure TDynArrayHashed.HashInvalidate;
@@ -44571,7 +44845,7 @@ end;
 
 //var TDynArrayHashedCollisionCount: cardinal;
 
-function TDynArrayHashed.HashFind(aHashCode: cardinal): integer;
+function TDynArrayHashed.HashFind(aHashCode: cardinal; aForAdd: boolean): integer;
 var first,last: integer;
     h: cardinal;
     P: PAnsiChar;
@@ -44598,13 +44872,15 @@ begin
   first := result;
   repeat
     with fHashs[result] do
-    if Hash=aHashCode then begin
-      result := Index;
-      exit;
-    end else
-    if Hash=HASH_VOID then
-      break; // not found
-    inc(result);
+      if (Hash=aHashCode) and not aForAdd then begin
+        result := Index;
+        exit;
+      end else
+      if Hash=HASH_VOID then begin
+        result := -(result+1);
+        exit; // aForAdd or not found -> returns void index in fHashs[] as negative
+      end;
+    inc(result); // try next entry on hash collision
     if result=last then
       // reached the end -> search once from fHash[0] to fHash[first-1]
       if result=first then
@@ -44613,10 +44889,10 @@ begin
         last := first;
       end;
   until false;
-  result := -1;
+  raise ESynException.Create('HashFind fatal collision'); // should never be here
 end;
 
-function TDynArrayHashed.HashFind(aHashCode: cardinal; const Elem): integer;
+function TDynArrayHashed.HashFindAndCompare(aHashCode: cardinal; const Elem): integer;
 var first,last: integer;
     P: PAnsiChar;
 begin
@@ -44668,7 +44944,7 @@ begin
         last := first;
       end;
   until false;
-  raise ESynException.Create('HashFind fatal collision'); // should never be here
+  raise ESynException.Create('HashFindAndCompare fatal collision');
 end;
 
 function TDynArrayHashed.GetHashFromIndex(aIndex: Integer): Cardinal;
@@ -44699,15 +44975,15 @@ begin
       if h=HASH_VOID then
         continue;
       result := fHashs[i].Index;
-      for j := i+1 to fHashsCount-1 do
-        if fHashs[j].Hash=h then
+      for j := 0 to fHashsCount-1 do
+        if (i<>j) and (fHashs[j].Hash=h) then
           exit; // found duplicate
     end;
   end;
   result := -1;
 end;
 
-function TDynArrayHashed.ReHash: boolean;
+function TDynArrayHashed.ReHash(forAdd: boolean): boolean;
 var i, n, cap, ndx: integer;
     P: PAnsiChar;
     aHashCode: cardinal;
@@ -44716,7 +44992,7 @@ begin
   fHashs := nil;
   fHashsCount := 0;
   n := Count;
-  if (n=0) or (n<fHashCountTrigger) then
+  if not forAdd and ((n=0) or (n<fHashCountTrigger)) then
     exit; // hash only if needed, and avoid GPF after TDynArray.Clear (Count=0)
   if not Assigned(fEventHash) and not Assigned(fHashElement) then
     exit;
@@ -44734,9 +45010,9 @@ begin
       aHashCode := fHashElement(P^,fHasher);
     if aHashCode=HASH_VOID then
       aHashCode := HASH_ONVOIDCOLISION; // 0 means void slot in the loop below
-    ndx := HashFind(aHashCode,P^);
+    ndx := HashFindAndCompare(aHashCode,P^);
     if ndx<0 then
-      // >=0 -> already found -> not necessary to add duplicated hash
+      // >=0 means found exact duplicate of P^: shouldn't happen -> ignore 
       with fHashs[-ndx-1] do begin
         Hash := aHashCode;
         Index := i;
@@ -45650,24 +45926,34 @@ procedure TTextWriter.Add(Value: Extended; precision: integer);
 var S: ShortString;
 begin
   if Value=0 then
-    Add('0') else
-    AddNoJSONEscape(@S[1],ExtendedToString(S,Value,precision));
+    Add('0') else begin
+    S[0] := AnsiChar(ExtendedToString(S,Value,precision));
+    case PInteger(@S)^ and $ffdfdfdf of // inlined ExtendedToStringNan()
+      3+ord('N')shl 8+ord('A')shl 16+ord('N')shl 24:
+        AddShort(JSON_NAN[seNan]);
+      3+ord('I')shl 8+ord('N')shl 16+ord('F')shl 24,
+      4+ord('+')shl 8+ord('I')shl 16+ord('N')shl 24:
+        AddShort(JSON_NAN[seInf]);
+      4+ord('-')shl 8+ord('I')shl 16+ord('N')shl 24:
+        AddShort(JSON_NAN[seNegInf]);
+    else
+      AddNoJSONEscape(@S[1],ord(S[0]));
+    end;
+  end;
 end;
 
 procedure TTextWriter.AddDouble(Value: double);
-var S: ShortString;
 begin
   if Value=0 then
     Add('0') else
-    AddNoJSONEscape(@S[1],ExtendedToString(S,Value,DOUBLE_PRECISION));
+    Add(Value,DOUBLE_PRECISION);
 end;
 
 procedure TTextWriter.AddSingle(Value: single);
-var S: ShortString;
 begin
   if Value=0 then
     Add('0') else
-    AddNoJSONEscape(@S[1],ExtendedToString(S,Value,SINGLE_PRECISION));
+    Add(Value,SINGLE_PRECISION);
 end;
 
 {$ifndef CPU64} // Add(Value: PtrInt) already implemented it
@@ -52641,7 +52927,7 @@ end;
 
 function TRawUTF8ListHashed.HashFind(aHashCode: cardinal): integer;
 begin
-  result := fHash.HashFind(aHashCode);
+  result := fHash.HashFind(aHashCode,false);
 end;
 
 
@@ -52821,20 +53107,59 @@ const
   DIC_KEY = 1;
   DIC_VALUECOUNT = 2;
   DIC_VALUE = 3;
-  
+  DIC_TIMECOUNT = 4;
+  DIC_TIMESEC = 5;
+
 constructor TSynDictionary.Create(aKeyTypeInfo,aValueTypeInfo: pointer;
-  aKeyCaseInsensitive: boolean);
+  aKeyCaseInsensitive: boolean; aTimeoutSeconds: cardinal);
 begin
   inherited Create;
   fSafe.Padding[DIC_KEYCOUNT].VType := varInteger;
   fSafe.Padding[DIC_KEY].VType := varUnknown;
   fSafe.Padding[DIC_VALUECOUNT].VType := varInteger;
   fSafe.Padding[DIC_VALUE].VType := varUnknown;
-  fSafe.PaddingMaxUsedIndex := DIC_VALUE;
+  fSafe.Padding[DIC_TIMECOUNT].VType := varInteger;
+  fSafe.Padding[DIC_TIMESEC].VType := varInteger;
+  fSafe.PaddingMaxUsedIndex := DIC_TIMESEC;
   fKeys.Init(aKeyTypeInfo,fSafe.Padding[DIC_KEY].VAny,nil,nil,nil,
     @fSafe.Padding[DIC_KEYCOUNT].VInteger,aKeyCaseInsensitive);
   fValues.Init(aValueTypeInfo,fSafe.Padding[DIC_VALUE].VAny,
     @fSafe.Padding[DIC_VALUECOUNT].VInteger);
+  fTimeouts.Init(aValueTypeInfo,fTimeOut,@fSafe.Padding[DIC_TIMECOUNT].VInteger);
+  fSafe.Padding[DIC_TIMESEC].VInteger := aTimeoutSeconds;
+end;
+
+procedure TSynDictionary.SetTimeouts;
+var i: integer;
+    timeout: cardinal;
+begin
+  if fSafe.Padding[DIC_TIMESEC].VInteger=0 then
+    exit;
+  fTimeOuts.SetCount(fSafe.Padding[DIC_KEYCOUNT].VInteger);
+  timeout := GetTickCount64 shr 10+fSafe.Padding[DIC_TIMESEC].VInteger;
+  for i := 0 to fSafe.Padding[DIC_TIMECOUNT].VInteger-1 do
+    fTimeOut[i] := timeout;
+end;
+
+function TSynDictionary.DeleteDeprecated: integer;
+var i: integer;
+    now: cardinal;
+begin
+  result := 0;
+  if fSafe.Padding[DIC_TIMESEC].VInteger=0 then
+    exit;
+  now := GetTickCount64 shr 10;
+  fSafe.Lock;
+  try
+    for i := fSafe.Padding[DIC_TIMECOUNT].VInteger-1 downto 0 do
+      if (now>fTimeOut[i]) and (fTimeOut[i]<>0) then begin
+        fKeys.Delete(i);
+        fValues.Delete(i);
+        fTimeOuts.Delete(i);
+      end;
+  finally
+    fSafe.UnLock;
+  end;
 end;
 
 procedure TSynDictionary.DeleteAll;
@@ -52844,6 +53169,8 @@ begin
     fKeys.Clear;
     fKeys.ReHash; // mandatory to avoid GPF
     fValues.Clear;
+    if fSafe.Padding[DIC_TIMESEC].VInteger>0 then
+      fTimeOuts.Clear;
   finally
     fSafe.UnLock;
   end;
@@ -52858,6 +53185,7 @@ end;
 
 function TSynDictionary.Add(const aKey, aValue): integer;
 var added: boolean;
+    tim: cardinal;
 begin
   fSafe.Lock;
   try
@@ -52867,6 +53195,10 @@ begin
         ElemCopy(aKey,ElemPtr(result)^); // fKey[result] := aKey;
       if fValues.Add(aValue)<>result then
         raise ESynException.CreateUTF8('%.Add fValues.Add',[self]);
+      if fSafe.Padding[DIC_TIMESEC].VInteger>0 then begin
+        tim := GetTickCount64 shr 10+fSafe.Padding[DIC_TIMESEC].VInteger;
+        fTimeOuts.Add(tim);
+      end;
     end else
       result := -1;
   finally
@@ -52876,17 +53208,26 @@ end;
 
 function TSynDictionary.AddOrUpdate(const aKey, aValue): integer;
 var added: boolean;
+    tim: cardinal;
 begin
   fSafe.Lock;
   try
     result := fKeys.FindHashedForAdding(aKey,added);
+    if fSafe.Padding[DIC_TIMESEC].VInteger>0 then
+      tim := GetTickCount64 shr 10+fSafe.Padding[DIC_TIMESEC].VInteger else
+      tim := 0;
     if added then begin
       with fKeys{$ifdef UNDIRECTDYNARRAY}.InternalDynArray{$endif} do
         ElemCopy(aKey,ElemPtr(result)^); // fKey[result] := aKey;
       if fValues.Add(aValue)<>result then
         raise ESynException.CreateUTF8('%.AddOrUpdate fValues.Add',[self]);
-    end else
+      if tim<>0 then
+        fTimeOuts.Add(tim);
+    end else begin
       fValues.ElemCopy(aValue,fValues.ElemPtr(result)^);
+      if tim<>0 then
+        fTimeOut[result] := tim;
+    end;
   finally
     fSafe.UnLock;
   end;
@@ -52897,8 +53238,11 @@ begin
   fSafe.Lock;
   try
     result := fKeys.FindHashed(aKey);
-    if result>=0 then
+    if result>=0 then begin
       fValues.ElemClear(fValues.ElemPtr(result)^);
+      if fSafe.Padding[DIC_TIMESEC].VInteger>0 then
+        fTimeOut[result] := 0;
+    end;
   finally
     fSafe.UnLock;
   end;
@@ -52909,8 +53253,11 @@ begin
   fSafe.Lock;
   try
     result := fKeys.FindHashedAndDelete(aKey);
-    if result>=0 then
+    if result>=0 then begin
       fValues.Delete(result);
+      if fSafe.Padding[DIC_TIMESEC].VInteger>0 then
+        fTimeOuts.Delete(result);
+    end;
   finally
     fSafe.UnLock;
   end;
@@ -52985,6 +53332,8 @@ begin
     ndx := fKeys.FindHashed(aKey);
     if ndx>=0 then begin
       fValues.ElemCopy(fValues.ElemPtr(ndx)^,aValue);
+      if fSafe.Padding[DIC_TIMESEC].VInteger>0 then
+        fTimeout[ndx] := GetTickCount64 shr 10+fSafe.Padding[DIC_TIMESEC].VInteger;
       result := true;
     end else
       result := false;
@@ -53069,6 +53418,11 @@ begin
   {$endif}
 end;
 
+function TSynDictionary.TimeoutSeconds: cardinal;
+begin
+  result := fSafe.Padding[DIC_TIMESEC].VInteger;
+end;
+
 procedure TSynDictionary.SaveToJSON(W: TTextWriter; EnumSetsAsText: boolean);
 var k,v: RawUTF8;
 begin
@@ -53110,7 +53464,8 @@ begin
   try
     if fKeys.LoadFromJSON(pointer(k))<>nil then
       if fValues.LoadFromJSON(pointer(v))<>nil then
-        if fKeys.Count=fValues.Count then
+        if fKeys.Count=fValues.Count then begin
+          SetTimeouts;
           if EnsureNoKeyCollision then
             // fKeys.Rehash is not enough, since input JSON may be invalid
             result := fKeys.IsHashElementWithoutCollision<0 else begin
@@ -53118,6 +53473,7 @@ begin
             fKeys.Rehash;
             result := true;
           end;
+        end;
   finally
     fSafe.UnLock;
   end;
@@ -53136,6 +53492,7 @@ begin
     if P<>nil then
       P := fValues.LoadFrom(P);
     if (P<>nil) and (fKeys.Count=fValues.Count) then begin
+      SetTimeouts;
       fKeys.ReHash; // optimistic: input from safe TSynDictionary.SaveToBinary
       result := true;
     end;
@@ -58562,6 +58919,25 @@ begin
   result := Value(aName)='1';
 end;
 
+function TSynNameValue.ValueEnum(const aName: RawUTF8; aEnumTypeInfo: pointer;
+  out aEnum; aEnumDefault: byte): boolean;
+var v: RawUTF8;
+    err,i: integer;
+begin
+  result := false;
+  byte(aEnum) := aEnumDefault;
+  v := trim(Value(aName,''));
+  if v='' then
+    exit;
+  i := GetInteger(pointer(v),err);
+  if (err<>0) or (i<0) then
+    i := GetEnumNameValue(aEnumTypeInfo,v,true);
+  if i>=0 then begin
+    byte(aEnum) := i;
+    result := true;
+  end;
+end;
+
 function TSynNameValue.Initialized: boolean;
 begin
   result := fDynArray.fValue=@List;
@@ -58638,7 +59014,7 @@ begin
 end;
 
 procedure TSynNameValue.AsDocVariant(out DocVariant: variant;
-  ExtendedJson,ValueAsString: boolean);
+  ExtendedJson,ValueAsString,AllowVarDouble: boolean);
 var ndx: integer;
 begin
   if Count>0 then
@@ -58649,8 +59025,8 @@ begin
     SetLength(VValue,VCount);
     for ndx := 0 to VCount-1 do begin
       VName[ndx] := List[ndx].Name;
-      if ValueAsString or
-         not GetNumericVariantFromJSON(pointer(List[ndx].Value),TVarData(VValue[ndx])) then
+      if ValueAsString or not GetNumericVariantFromJSON(pointer(List[ndx].Value),
+          TVarData(VValue[ndx]),AllowVarDouble) then
         RawUTF8ToVariant(List[ndx].Value,VValue[ndx]);
     end;
   end else
@@ -58663,7 +59039,7 @@ begin
 end;
 
 function TSynNameValue.MergeDocVariant(var DocVariant: variant;
-  ValueAsString: boolean; ChangedProps: PVariant; ExtendedJson: Boolean): integer;
+  ValueAsString: boolean; ChangedProps: PVariant; ExtendedJson,AllowVarDouble: Boolean): integer;
 var DV: TDocVariantData absolute DocVariant;
     i,ndx: integer;
     v: variant;
@@ -58675,8 +59051,8 @@ begin
   result := 0; // returns number of changed values
   for i := 0 to Count-1 do begin
     VarClear(v);
-    if ValueAsString or
-       not GetNumericVariantFromJSON(pointer(List[i].Value),TVarData(v)) then
+    if ValueAsString or not GetNumericVariantFromJSON(pointer(List[i].Value),
+        TVarData(v),AllowVarDouble) then
       RawUTF8ToVariant(List[i].Value,v);
     ndx := DV.GetValueIndex(List[i].Name);
     if ndx<0 then

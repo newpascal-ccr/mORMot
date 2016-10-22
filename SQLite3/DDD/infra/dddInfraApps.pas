@@ -72,6 +72,7 @@ uses
   Variants,
   SynCommons,
   SynLog,
+  SynEcc,
   mORMot,
   mORMotDDD,
   dddInfraSettings,
@@ -245,6 +246,7 @@ type
   protected
     fORM: TSynConnectionDefinition;
     fClient: TDDDRestClient;
+    fTimeout: integer;
   public
     /// set the default values for Client.Root, ORM.ServerName,
     // Client.WebSocketsPassword and ORM.Password
@@ -265,6 +267,8 @@ type
     // property, so that the client would automatically try to re-connect
     function OnAuthentificationFailed(Retry: integer; var aUserName, aPassword: string;
       out aPasswordHashed: boolean): boolean;
+    /// you can overload here the TCP timeout delay, in seconds
+    property Timeout: integer read fTimeout write fTimeout;
   published
     /// defines a mean of access to a TSQLRest instance
     // - using Kind/ServerName/DatabaseName/User/Password properties: Kind
@@ -879,7 +883,8 @@ function CanSubscribeLog(const Callback: ISynLogCallback): Boolean;
 begin
   result := false;
   if Assigned(Callback) then
-    if HttpClientFullWebSocketsLog or HttpServerFullWebSocketsLog then begin
+    if {$ifdef WITHLOG}(WebSocketLog<>nil) or{$endif}
+       HttpClientFullWebSocketsLog or HttpServerFullWebSocketsLog then begin
       Callback.Log(sllError, FormatUTF8(
         '%00%  SubscribeLog is not allowed when low-level WebSockets ' +
         'frame logging is enabled (otherwise a race condition happens)',
@@ -1814,6 +1819,8 @@ begin
 end;
 
 initialization
+  TJSONSerializer.RegisterObjArrayForJSON(
+    [TypeInfo(TECCCertificateObjArray),TECCCertificate]);
   {$ifdef EnableMemoryLeakReporting}
   {$ifdef HASFASTMM4} // FastMM4 integrated in Delphi 2006 (and up)
   ReportMemoryLeaksOnShutdown := True;

@@ -205,7 +205,7 @@ unit mORMotSQLite3;
 
     Version 1.18
     - unit SQLite3.pas renamed mORMotSQLite3.pas
-    - updated SQLite3 engine to latest version 3.14.2
+    - updated SQLite3 engine to latest version 3.15.0
     - BATCH adding in TSQLRestServerDB will now perform SQLite3 multi-INSERT
       statements: performance boost is from 2x (mem with transaction) to 60x
       (full w/out transaction) - faster than SQlite3 as external DB
@@ -686,11 +686,13 @@ type
     // - typical use may be:
     // ! Server.StaticDataAdd(TSQLRestStorageShardDB.Create(TSQLRecordSharded,Server,500000))
     // - you may define some low-level tuning of SQLite3 process via aSynchronous
-    // / aCacheSizePrevious / aCacheSizeLast parameters
+    // / aCacheSizePrevious / aCacheSizeLast / aMaxShardCount parameters, if
+    // the default smOff / 1MB / 2MB / 100 values are not enough
     constructor Create(aClass: TSQLRecordClass; aServer: TSQLRestServer;
       aShardRange: TID; aOptions: TSQLRestStorageShardOptions=[];
-      const aShardRootFileName: TFileName=''; aSynchronous: TSQLSynchronousMode=smOff;
-      aCacheSizePrevious: integer=1000; aCacheSizeLast: integer=10000); reintroduce; virtual;
+      const aShardRootFileName: TFileName=''; aMaxShardCount: integer=100;
+      aSynchronous: TSQLSynchronousMode=smOff;
+      aCacheSizePrevious: integer=250; aCacheSizeLast: integer=500); reintroduce; virtual;
   published
     /// associated file name for the SQLite3 database files
     // - contains the folder, and root file name for the storage
@@ -2598,19 +2600,19 @@ end;
 
 constructor TSQLRestStorageShardDB.Create(aClass: TSQLRecordClass;
   aServer: TSQLRestServer; aShardRange: TID; aOptions: TSQLRestStorageShardOptions;
-  const aShardRootFileName: TFileName; aSynchronous: TSQLSynchronousMode;
-  aCacheSizePrevious, aCacheSizeLast: Integer);
+  const aShardRootFileName: TFileName; aMaxShardCount: integer;
+  aSynchronous: TSQLSynchronousMode; aCacheSizePrevious,aCacheSizeLast: Integer);
 begin
   fShardRootFileName := aShardRootFileName;
   fSynchronous := aSynchronous;
   fCacheSizePrevious := aCacheSizePrevious;
   fCacheSizeLast := aCacheSizeLast;
-  inherited Create(aClass,aServer,aShardRange,aOptions);
+  inherited Create(aClass,aServer,aShardRange,aOptions,aMaxShardCount);
 end;
 
 function TSQLRestStorageShardDB.DBFileName(ShardIndex: Integer): TFileName;
 begin
-  result := Format('%s%.4d.dbs',[fShardRootFileName,ShardIndex]);
+  result := Format('%s%.4d.dbs',[fShardRootFileName,fShardOffset+ShardIndex]);
 end;
 
 function TSQLRestStorageShardDB.InitNewShard: TSQLRest;
@@ -2621,7 +2623,7 @@ var db: TSQLRestServerDB;
 begin
   inc(fShardLast);
   model := TSQLModel.Create([fStoredClass],FormatUTF8('shard%',[fShardLast]));
-  if fInitShardsIsLast then // last .dbs uses 40MB cache, previous 4MB only
+  if fInitShardsIsLast then // last/new .dbs = 2MB cache, previous 1MB only
     cachesize := fCacheSizeLast else
     cachesize := fCacheSizePrevious;
   sql := TSQLDatabase.Create(DBFileName(fShardLast),'',0,cachesize);
@@ -2636,7 +2638,7 @@ begin
 end;
 
 procedure TSQLRestStorageShardDB.InitShards;
-var f,i,num: integer;
+var f,i,num,first: integer;
     db: TFindFilesDynArray;
     mask: TFileName;
 begin
@@ -2652,12 +2654,19 @@ begin
   db := FindFiles(ExtractFilePath(mask),ExtractFileName(mask),'',true); // sorted = true
   if db=nil then
     exit; // no existing data
-  for f := 0 to high(db) do begin
+  fShardOffset := -1;
+  first := length(db)-integer(fMaxShardCount);
+  if first<0 then
+    first := 0;
+  for f := first to high(db) do begin
     i := Pos('.dbs',db[f].Name);
     if (i<=4) or not TryStrToInt(Copy(db[f].Name,i-4,4),num) then begin
       InternalLog('InitShards(%)?',[db[f].Name],sllWarning);
       continue;
     end;
+    if fShardOffset<0 then
+      fShardOffset := num;
+    dec(num,fShardOffset);
     if not SameText(DBFileName(num),db[f].Name) then
       raise EORMException.CreateUTF8('%.InitShards(%)',[self,db[f].Name]);
     if f = high(db) then
@@ -2665,11 +2674,13 @@ begin
     fShardLast := num-1; // 'folder\root0005.dbs' -> fShardLast := 4
     InitNewShard;        // now fShardLast=5, fShards[5] contains root005.dbs
   end;
+  if fShardOffset<0 then
+    fShardOffset := 0;
   if Integer(fShardLast)<0 then begin
     InternalLog('InitShards?',sllWarning);
     exit;
   end;
-  fInitShardsIsLast := true; // any newly appended .dbs would use 40MB of cache
+  fInitShardsIsLast := true; // any newly appended .dbs would use 2MB of cache
   fShardLastID := fShards[fShardLast].TableMaxID(fStoredClass);
   if fShardLastID<0 then
     fShardLastID := 0; // no data yet

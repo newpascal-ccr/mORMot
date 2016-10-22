@@ -618,7 +618,7 @@ type
   // 100% Delphi simple database engine
   TTestMemoryBased = class(TTestSQLite3Engine)
   protected
-    function CreateShardDB: TSQLRestServer;
+    function CreateShardDB(maxshard: Integer): TSQLRestServer;
   published
     /// validate RTREE virtual tables
     procedure _RTree;
@@ -628,6 +628,8 @@ type
     procedure ShardRead;
     /// validate TSQLRestStorageShardDB reading after deletion of several shards
     procedure ShardReadAfterPurge;
+    /// validate TSQLRestStorageShardDB.MaxShardCount implementation
+    procedure _MaxShardCount;
   end;
 
   /// this test case will test most functions, classes and types defined and
@@ -4787,9 +4789,11 @@ begin
   GetVariantFromJSON('1234567890123456789',False,v,nil);
   Check(vd.VType=varInt64);
   Check(v=1234567890123456789);
-  GetVariantFromJSON('12345678901234567890',False,v,nil);
+  GetVariantFromJSON('12345678901234567890',False,v,nil,true);
   Check(vd.VType=varDouble);
   CheckSame(v,12345678901234567890.0);
+  GetVariantFromJSON('12345678901234567890',False,v,nil,false);
+  Check(vd.VType=varString);
   GetVariantFromJSON('-123.1',False,v,nil);
   Check(vd.VType=varCurrency);
   Check(v=-123.1);
@@ -4799,19 +4803,22 @@ begin
   GetVariantFromJSON('-123.123',False,v,nil);
   Check(vd.VType=varCurrency);
   Check(v=-123.123);
-  GetVariantFromJSON('123.1234',False,v,nil);
+  GetVariantFromJSON('123.1234',False,v,nil,false);
   Check(vd.VType=varCurrency);
   Check(v=123.1234);
-  GetVariantFromJSON('-123.12345',False,v,nil);
+  GetVariantFromJSON('123.1234',False,v,nil,true);
+  Check(vd.VType=varCurrency);
+  Check(v=123.1234);
+  GetVariantFromJSON('-123.12345',False,v,nil,true);
   Check(vd.VType=varDouble);
   CheckSame(v,-123.12345);
-  GetVariantFromJSON('-1.123e12',False,v,nil);
+  GetVariantFromJSON('-1.123e12',False,v,nil,true);
   Check(vd.VType=varDouble);
   CheckSame(v,-1.123e12);
-  GetVariantFromJSON('-123.123e-2',False,v,nil);
+  GetVariantFromJSON('-123.123e-2',False,v,nil,true);
   Check(vd.VType=varDouble);
   CheckSame(v,-123.123e-2);
-  GetVariantFromJSON('-123.123ee2',False,v,nil);
+  GetVariantFromJSON('-123.123ee2',False,v,nil,true);
   Check(vd.VType=varString);
   Check(v='-123.123ee2');
   GetVariantFromJSON('1-123.12',False,v,nil);
@@ -5957,7 +5964,15 @@ begin
   Check(UTF8ContentType('123.12')=sftCurrency);
   Check(UTF8ContentType('123.12345678')=sftFloat);
   Check(UTF8ContentType('1.13e+12')=sftFloat);
+  Check(UTF8ContentType('1.13e12')=sftFloat);
   Check(UTF8ContentType('-1.13e-12')=sftFloat);
+  Check(UTF8ContentType('1.13e+120')=sftFloat);
+  Check(UTF8ContentType('1.13E120')=sftFloat);
+  Check(UTF8ContentType('1.13E-120')=sftFloat);
+  Check(UTF8ContentType('1.13e+330')=sftUTF8Text);
+  Check(UTF8ContentType('1.13e330')=sftUTF8Text);
+  Check(UTF8ContentType('1.13e-330')=sftUTF8Text);
+  Check(UTF8ContentType('420014165100E335')=sftUTF8Text);
   Check(UTF8ContentType('123.')=sftUTF8Text);
   Check(UTF8ContentType('123.a')=sftUTF8Text);
   Check(UTF8ContentType('123.1a')=sftUTF8Text);
@@ -7015,8 +7030,7 @@ var JSON, JSON2: RawUTF8;
 begin
   V := _JSON('["one",2,3]',aOptions);
   Check(V._JSON='["one",2,3]');
-  Doc.InitObject(['name','John','birthyear',1972],
-    aOptions+[dvoReturnNullForUnknownProperty,dvoReturnNullForOutOfRangeIndex]);
+  Doc.InitObject(['name','John','birthyear',1972],aOptions+[dvoReturnNullForUnknownProperty]);
   CheckDoc(Doc);
   Check(Doc.Value['toto']=null);
   Check(variant(Doc).toto=null);
@@ -8655,12 +8669,18 @@ var A: TAES;
     noaesni: boolean;
     Timer: array[boolean] of TPrecisionTimer;
     ValuesCrypted,ValuesOrig: array[0..1] of RawByteString;
+    {$ifdef CPUINTEL}
+    backup: TIntelCpuFeatures;
+    {$endif CPUINTEL}
 const MAX = 4096*1024;  // test 4 MB data, i.e. multi-threaded AES
       MODES: array[0..4{$ifdef USE_PROV_RSA_AES}+2{$endif}] of TAESAbstractClass =
         (TAESECB, TAESCBC, TAESCFB, TAESOFB, TAESCTR
          {$ifdef USE_PROV_RSA_AES}, TAESECB_API, TAESCBC_API{$endif});
       // TAESCFB_API and TAESOFB_API just do not work
 begin
+  {$ifdef CPUINTEL}
+  backup := CpuFeatures;
+  {$endif CPUINTEL}
   Check(AESSelfTest(true),'Internal Tables');
   SetLength(orig,MAX);
   SetLength(crypted,MAX+256);
@@ -8756,6 +8776,9 @@ begin
       break;
     {$endif CPUINTEL}
   end;
+  {$ifdef CPUINTEL}
+  CpuFeatures := backup;
+  {$endif CPUINTEL}
 end;
 
 procedure TTestCryptographicRoutines._CompressShaAes;
@@ -9089,22 +9112,16 @@ var selfsignedroot, secret: TECCCertificateSecret;
     cert: TECCCertificate;
     sav, json, serial: RawUTF8;
     bin: RawByteString;
-    {$ifdef DELPHI5OROLDER}
-    chain: TECCCertificateChain;
-    {$else}
+    {$ifndef DELPHI5OROLDER}
     json1,json2,jsonchain: RawUTF8;
-    chain: TECCCertificateChainFile;
     {$endif}
+    chain: TECCCertificateChain;
     sign: TECCSignatureCertified;
     signcontent: TECCSignatureCertifiedContent;
 begin
   if not ecc_available then
     exit;
-  {$ifdef DELPHI5OROLDER}
   chain := TECCCertificateChain.Create;
-  {$else}
-  chain := TECCCertificateChainFile.Create;
-  {$endif}
   try
     check(chain.Count=0);
     selfsignedroot := TECCCertificateSecret.CreateNew(nil,'synopse.info',10);
@@ -9170,7 +9187,7 @@ begin
     json2 := PUBPRIVJSON+copy(PUBPRIV64,1,posEx('y1uzNJeQTIk',PUBPRIV64)+10)+'AAAAA"}';
     check(json1=json2,'no private key');
     jsonchain := ObjectToJson(chain);
-    check(length(jsonchain)=2279);
+    check(length(jsonchain)=1545);
     {$endif}
     sav := secret.SaveToSource('MyPrivKey','Generated by tests','123456');
 //  FileFromString(sav,'privkey.pas');
@@ -9184,11 +9201,7 @@ begin
     json := chain.SaveToJson;
     check(length(json)=718,'certificates have fixed len');
     chain.Free; // will release selfsignedroot
-    {$ifdef DELPHI5OROLDER}
     chain := TECCCertificateChain.Create;
-    {$else}
-    chain := TECCCertificateChainFile.Create;
-    {$endif}
     check(chain.IsValid(secret)=ecvUnknownAuthority);
     check(chain.LoadFromJson(json));
     check(chain.SaveToJson=json);
@@ -9196,7 +9209,7 @@ begin
     check(chain.IsValid(secret)=ecvValidSigned);
     {$ifndef DELPHI5OROLDER}
     json := ObjectToJson(chain);
-    check(length(json)=2280);
+    check(length(json)=1546);
     chain.SaveToFile('test');
     {$endif}
     bin := secret.SaveToSecureBinary('toto',64,1000);
@@ -9402,7 +9415,7 @@ var key: THash256;
 {    c.EF := efAesCfb128;
     c.MAC := macHmacCrc32c;
     s.EF := c.EF;
-    s.MAC := c.MAC; } 
+    s.MAC := c.MAC; }
     c.ComputeHandshake(cf);
     Check(s.ComputeHandshake(cf,sf)=sprSuccess);
     Check(c.ValidateHandshake(sf)=sprSuccess);
@@ -9420,18 +9433,25 @@ begin
     handshake;
     for i := 0 to MAX do begin
       c.Encrypt(str[i],enc);
+      check(s.CheckError(enc)=sprSuccess);
       check(s.Decrypt(enc,after)=sprSuccess);
       check(after=str[i]);
       if i and 7=0 then
          continue; // check asymmetric communication
       s.Encrypt(str[i],enc);
+      check(c.CheckError(enc)=sprSuccess);
       check(c.Decrypt(enc,after)=sprSuccess);
       check(after=str[i]);
       if i and 3=0 then
          continue;
       c.Encrypt(str[i],enc);
+      check(s.CheckError(enc)=sprSuccess);
       check(s.Decrypt(enc,after)=sprSuccess);
       check(after=str[i]);
+      c.Encrypt(str[i],enc);
+      inc(enc[2]);
+      check(s.CheckError(enc)=sprInvalidMAC);
+      check(s.Decrypt(enc,after)=sprInvalidMAC);
     end;
     c.Free;
     s.Free;
@@ -10249,10 +10269,11 @@ end;
 const SHARD_MAX = 10000;
       SHARD_RANGE = 1000;
 
-function TTestMemoryBased.CreateShardDB: TSQLRestServer;
+function TTestMemoryBased.CreateShardDB(maxshard: Integer): TSQLRestServer;
 begin
   result := TSQLRestServer.CreateWithOwnModel([TSQLRecordTest],false,'shardtest');
-  Check(result.StaticDataAdd(TSQLRestStorageShardDB.Create(TSQLRecordTest,result,SHARD_RANGE,[])));
+  Check(result.StaticDataAdd(TSQLRestStorageShardDB.Create(
+    TSQLRecordTest,result,SHARD_RANGE,[],'',maxshard)));
 end;
 
 procedure TTestMemoryBased.ShardWrite;
@@ -10262,7 +10283,7 @@ var R: TSQLRecordTest;
     b: TSQLRestBatch;
 begin
   DirectoryDelete(ExeVersion.ProgramFilePath,'Test0*.dbs',True);
-  db := CreateShardDB;
+  db := CreateShardDB(100);
   try
     R := TSQLRecordTest.Create;
     try
@@ -10294,7 +10315,7 @@ var R: TSQLRecordTest;
     i: integer;
     db: TSQLRestServer;
 begin
-  db := CreateShardDB;
+  db := CreateShardDB(100);
   try
     R := TSQLRecordTest.Create;
     try
@@ -10318,7 +10339,7 @@ var R: TSQLRecordTest;
 begin
   Check(DeleteFile(ExeVersion.ProgramFilePath+'Test0000.dbs'));
   Check(DeleteFile(ExeVersion.ProgramFilePath+'Test0001.dbs'));
-  db := CreateShardDB;
+  db := CreateShardDB(100);
   try
     R := TSQLRecordTest.Create;
     try
@@ -10328,6 +10349,49 @@ begin
         Check(db.Retrieve(i,R));
         Check(db.RetrieveBlobFields(R));
         R.CheckWith(self,i,0);
+      end;
+    finally
+      R.Free;
+    end;
+  finally
+    db.Free;
+  end;
+end;
+
+procedure TTestMemoryBased._MaxShardCount;
+var R: TSQLRecordTest;
+    i,last: integer;
+    db: TSQLRestServer;
+    b: TSQLRestBatch;
+begin
+  db := CreateShardDB(5);
+  try
+    R := TSQLRecordTest.Create;
+    try
+      last := SHARD_MAX-SHARD_RANGE*5;
+      for i := 1 to last do
+        Check(not db.Retrieve(i,R));
+      for i := last+1 to SHARD_MAX do begin
+        Check(db.Retrieve(i,R));
+        Check(db.RetrieveBlobFields(R));
+        R.CheckWith(self,i,0);
+      end;
+      b := TSQLRestBatch.Create(db,TSQLRecordTest,SHARD_RANGE div 3,[boExtendedJSON]);
+      try
+        for i := SHARD_MAX+1 to SHARD_MAX+2000 do begin
+          R.FillWith(i);
+          Check(b.Add(R,true)=i-(SHARD_MAX+1));
+        end;
+        Check(db.BatchSend(b)=HTTP_SUCCESS);
+      finally
+        b.Free;
+      end;
+      last := SHARD_MAX+2000-SHARD_RANGE*5;
+      for i := 1 to last do
+        Check(not db.Retrieve(i,R));
+      for i := last+1 to SHARD_MAX+2000 do begin
+        Check(db.Retrieve(i,R));
+        R.CheckWith(self,i,0,false);
       end;
     finally
       R.Free;
@@ -15142,10 +15206,10 @@ end;
 
 procedure TTestBidirectionalRemoteConnection.WebsocketsBinaryProtocol;
 begin
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('','',false),focBinary);
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('','pass',false),focBinary);
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('','',true),focBinary);
-  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('','pass',true),focBinary);
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,''),focBinary);
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'pass'),focBinary);
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'',true),focBinary);
+  WebsocketsLowLevel(TWebSocketProtocolBinary.Create('',false,'pass',true),focBinary);
 end;
 
 procedure TTestBidirectionalRemoteConnection.WebsocketsJSONProtocol;
