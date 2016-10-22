@@ -38836,7 +38836,7 @@ begin
       GetJSONToAnyVariant(Value,result,EndOfObject,TryCustomVariants);
   end else begin
     Val := GetJSONField(result,result,@wasString,EndOfObject);
-    GetVariantFromJSON(Val,wasString,Value);
+    GetVariantFromJSON(Val,wasString,Value{$ifdef FPC},nil,true{$endif});
   end;
   if result=nil then
     result := @NULCHAR;
