@@ -136,3 +136,8 @@ backup/
 bin/
 lib/
 lib*/
+
+!fpc-linux32/*
+!fpc-linux64/*
+!fpc-win32/*
+!fpc-win64/*
