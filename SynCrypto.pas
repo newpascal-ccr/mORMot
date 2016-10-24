@@ -1029,7 +1029,7 @@ type
     /// finalize and compute the resulting SHA1 hash Digest of all data
     // affected to Update() method
     // - will also call Init to reset all internal temporary context, for safety 
-    procedure Final(out Digest: TSHA1Digest);
+    procedure Final(out Digest: TSHA1Digest; NoInit: boolean=false);
     /// one method to rule them all
     // - call Init, then Update(), then Final()
     // - only Full() is Padlock-implemented - use this rather than Update()
@@ -1053,7 +1053,7 @@ type
     procedure Update(Buffer: pointer; Len: integer);
     /// finalize and compute the resulting SHA256 hash Digest of all data
     // affected to Update() method
-    procedure Final(out Digest: TSHA256Digest);
+    procedure Final(out Digest: TSHA256Digest; NoInit: boolean=false);
     /// one method to rule them all
     // - call Init, then Update(), then Final()
     // - only Full() is Padlock-implemented - use this rather than Update()
@@ -1228,7 +1228,7 @@ type
     /// call this method for each continuous message block
     procedure Update(msg: pointer; msglen: integer);
     /// computes the HMAC of all supplied message according to the key
-    procedure Done(out result: TSHA1Digest);
+    procedure Done(out result: TSHA1Digest; NoInit: boolean=false);
   end;
   /// points to a HMAC message authentication context using SHA1
   PHMAC_SHA1 = ^THMAC_SHA1;
@@ -1288,7 +1288,7 @@ type
     /// call this method for each continuous message block
     procedure Update(const msg: THash256); overload;
     /// computes the HMAC of all supplied message according to the key
-    procedure Done(out result: TSHA256Digest);
+    procedure Done(out result: TSHA256Digest; NoInit: boolean=false);
   end;
   /// points to a HMAC message authentication context using SHA256
   PHMAC_SHA256 = ^THMAC_SHA256;
@@ -1907,10 +1907,10 @@ type
   end;
 
   TSHAContext = packed record
-    // Working hash
-    Hash  : TSHAHash;
+    // Working hash (TSHA256.Init expect this field to be the first)
+    Hash: TSHAHash;
     // 64bit msg length
-    MLen  : Int64;
+    MLen: Int64;
     // Block buffer
     Buffer: array[0..63] of byte;
     // Index in buffer
@@ -2117,12 +2117,12 @@ begin
   sha.Update(msg,msglen);
 end;
 
-procedure THMAC_SHA1.Done(out result: TSHA1Digest);
+procedure THMAC_SHA1.Done(out result: TSHA1Digest; NoInit: boolean);
 begin
   sha.Final(result);
   sha.Update(@step7data,64);
   sha.Update(@result,sizeof(result));
-  sha.Final(result);
+  sha.Final(result,NoInit);
   FillZero(step7data);
 end;
 
@@ -2165,7 +2165,7 @@ begin
   for i := 2 to count do begin
     mac := first; // re-use the very same SHA-1 context for best performance
     mac.sha.Update(@tmp,sizeof(tmp));
-    mac.Done(tmp);
+    mac.Done(tmp,true);
     XorMemory(@result,@tmp,sizeof(result));
   end;
   FillcharFast(first,sizeof(first),0);
@@ -2208,13 +2208,14 @@ begin
   sha.Update(@msg,sizeof(msg));
 end;
 
-procedure THMAC_SHA256.Done(out result: TSHA256Digest);
+procedure THMAC_SHA256.Done(out result: TSHA256Digest; NoInit: boolean);
 begin
   sha.Final(result);
   sha.Update(@step7data,64);
   sha.Update(@result,sizeof(result));
-  sha.Final(result);
-  FillZero(step7data);
+  sha.Final(result,NoInit);
+  if not NoInit then
+    FillZero(step7data);
 end;
 
 procedure HMAC_SHA256(key,msg: pointer; keylen,msglen: integer; out result: TSHA256Digest);
@@ -2258,10 +2259,11 @@ begin
   for i := 2 to count do begin
     mac := first; // re-use the very same SHA-256 context for best performance
     mac.sha.Update(@tmp,sizeof(tmp));
-    mac.Done(tmp);
+    mac.Done(tmp,true);
     XorMemory(@result,@tmp,sizeof(result));
   end;
   FillcharFast(first,sizeof(first),0);
+  FillcharFast(mac,sizeof(mac),0);
   FillZero(tmp);
 end;
 
@@ -5551,7 +5553,7 @@ begin
   end;
 end;
 
-procedure TSHA256.Final(out Digest: TSHA256Digest);
+procedure TSHA256.Final(out Digest: TSHA256Digest; NoInit: boolean);
 // finalize SHA256 calculation, clear context
 var Data: TSHAContext absolute Context;
 begin
@@ -5571,7 +5573,8 @@ begin
   // Hash -> Digest to little endian format
   bswap256(@Data.Hash,@Digest);
   // clear Data and internally stored Digest
-  Init;
+  if not NoInit then
+    Init;
 end;
 
 procedure TSHA256.Full(Buffer: pointer; Len: integer; out Digest: TSHA256Digest);
@@ -5595,7 +5598,6 @@ procedure TSHA256.Init;
 // initialize context
 var Data: TSHAContext absolute Context;
 begin
-  FillcharFast(Data,sizeof(Data),0);
   Data.Hash.A := $6a09e667;
   Data.Hash.B := $bb67ae85;
   Data.Hash.C := $3c6ef372;
@@ -5604,6 +5606,7 @@ begin
   Data.Hash.F := $9b05688c;
   Data.Hash.G := $1f83d9ab;
   Data.Hash.H := $5be0cd19;
+  FillcharFast(Data.MLen,sizeof(Data)-sizeof(Data.Hash),0);
 end;
 
 procedure TSHA256.Update(Buffer: pointer; Len: integer);
@@ -7273,7 +7276,7 @@ begin
   end;
 end;
 
-procedure TSHA1.Final(out Digest: TSHA1Digest);
+procedure TSHA1.Final(out Digest: TSHA1Digest; NoInit: boolean);
 var Data: TSHAContext absolute Context;
 begin
   // 1. append bit '1' after Buffer
@@ -7292,7 +7295,8 @@ begin
   // Hash -> Digest to little endian format
   bswap160(@Data.Hash,@Digest);
   // Clear Data
-  Init;
+  if not NoInit then
+    Init;
 end;
 
 procedure TSHA1.Full(Buffer: pointer; Len: integer; out Digest: TSHA1Digest);
@@ -8565,7 +8569,7 @@ var time: Int64;
     ext: TSynExtended;
     threads: array[0..2] of cardinal;
     version: RawByteString;
-    sha: TSHA256;
+    hmac: THMAC_SHA256;
     entropy: array[0..3] of TSHA256Digest; // 128 bytes
     paranoid: cardinal;
     p: PByteArray;
@@ -8578,25 +8582,25 @@ var time: Int64;
     {$ifdef MSWINDOWS}
     prov: HCRYPTPROV;
     {$endif}
-  procedure ShaInit;
+  procedure hmacInit;
   var timenow: Int64;
       g: TGUID;
       i, val: cardinal;
   begin
-    sha.Update(@time,sizeof(time));
-    sha.Update(@entropy,sizeof(entropy)); // bytes on CPU stack
+    hmac.Init(@entropy,sizeof(entropy)); // bytes on CPU stack
+    hmac.Update(@time,sizeof(time));
     QueryPerformanceCounter(timenow);
-    sha.Update(@timenow,sizeof(timenow)); // include GetEntropy() execution time
+    hmac.Update(@timenow,sizeof(timenow)); // include GetEntropy() execution time
     for i := 0 to timenow and 3 do begin
       CreateGUID(g); // not random, but genuine
-      sha.Update(@g,sizeof(g));
+      hmac.Update(@g,sizeof(g));
     end;
     {$ifdef CPUINTEL}
-    sha.Update(@CpuFeatures,sizeof(CpuFeatures));
+    hmac.Update(@CpuFeatures,sizeof(CpuFeatures));
     if cfRAND in CpuFeatures then
-      for i := 1 to 20 do begin // hash 80 bytes from CPU
+      for i := 1 to (PCardinal(@entropy[3])^ and 15)+2 do begin
         val := RdRand32;
-        sha.Update(@val,sizeof(val));
+        hmac.Update(@val,sizeof(val));
       end;
     {$endif}
   end;
@@ -8647,30 +8651,29 @@ begin
     until false;
   end;
   // always xor some minimal entropy - it won't hurt
-  sha.Init;
-  ShaInit;
+  hmacInit;
   version := RecordSave(ExeVersion,TypeInfo(TExeVersion));
-  sha.Update(pointer(version),length(version)); // exe and host/user info
-  sha.Final(entropy[3]);
-  ShaInit;
+  hmac.Update(pointer(version),length(version)); // exe and host/user info
+  hmac.Done(entropy[3]);
+  hmacInit;
   ext := NowUTC;
-  sha.Update(@ext,sizeof(ext));
-  sha.Final(entropy[2]);
-  ShaInit;
+  hmac.Update(@ext,sizeof(ext));
+  hmac.Done(entropy[2]);
+  hmacInit;
   ext := Random;
-  sha.Update(@ext,sizeof(ext));
+  hmac.Update(@ext,sizeof(ext));
   threads[0] := HInstance;
   threads[1] := GetCurrentThreadId;
   threads[2] := MainThreadID;
-  sha.Update(@threads,sizeof(threads));
-  sha.Final(entropy[1]);
-  ShaInit;
-  sha.Update(@SystemInfo,sizeof(SystemInfo));
-  sha.Update(pointer(OSVersionText),Length(OSVersionText));
+  hmac.Update(@threads,sizeof(threads));
+  hmac.Done(entropy[1]);
+  hmacInit;
+  hmac.Update(@SystemInfo,sizeof(SystemInfo));
+  hmac.Update(pointer(OSVersionText),Length(OSVersionText));
   SleepHiRes(0); // force non deterministic time shift
   QueryPerformanceCounter(time);
-  sha.Update(@time,sizeof(time)); // include GetEntropy() execution time
-  sha.Final(entropy[0]);
+  hmac.Update(@time,sizeof(time)); // include GetEntropy() execution time
+  hmac.Done(entropy[0]);
   for i := 0 to Len-1 do begin
     paranoid := PByteArray(@entropy)^[i and (sizeof(entropy)-1)];
     p^[i] := p^[i] xor Xor32Byte[(cardinal(p^[i]) shl 5) xor paranoid] xor paranoid;
@@ -8680,11 +8683,11 @@ begin
   {$endif}
     repeat // seed Random32 function above
       QueryPerformanceCounter(time);
-      rs1 := rs1 xor time;
-      rs2 := rs2 xor time;
-      rs3 := rs3 xor time;
+      rs1 := rs1 xor time xor PCardinal(@entropy[0])^;
+      rs2 := rs2 xor time xor PCardinal(@entropy[1])^;
+      rs3 := rs3 xor time xor PCardinal(@entropy[2])^;
     until (rs1>1) and (rs2>7) and (rs3>15);
-  for i := 1 to time and 15 do
+  for i := 1 to PCardinal(@entropy[3])^ and 15 do
     Random32; // warm up
 end;
 
