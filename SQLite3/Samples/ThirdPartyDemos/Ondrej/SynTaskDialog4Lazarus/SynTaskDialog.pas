@@ -316,7 +316,7 @@ type
   // !  if Task.VerifyChecked then
   // !    ShowMessage(Task.Verify);
   // !end;
-  {$ifndef UNICODE}
+  {$ifdef UNICODE}
   TTaskDialog = record
   {$else}
   TTaskDialog = object
