@@ -10647,13 +10647,13 @@ var
 // - crc32cfast() is 1.7 GB/s, crc32csse42() is 3.7 GB/s
 function crc32cfast(crc: cardinal; buf: PAnsiChar; len: cardinal): cardinal;
 
-/// compute CRC64C checksum on the supplied buffer
+/// compute CRC64C checksum on the supplied buffer, cascading two crc32c
 // - will use SSE 4.2 hardware accelerated instruction, if available
 // - will combine two crc32c() calls into a single Int64 result
 // - by design, such combined hashes cannot be cascaded
 function crc64c(buf: PAnsiChar; len: cardinal): Int64;
 
-/// compute CRC63C checksum on the supplied buffer
+/// compute CRC63C checksum on the supplied buffer, cascading two crc32c
 // - similar to crc64c, but with 63-bit, so no negative value, so may be used
 // safely e.g. as mORMot's TID source
 // - will use SSE 4.2 hardware accelerated instruction, if available
@@ -10686,18 +10686,22 @@ type
   /// pointer to a 128-bit buffer
   PBlock128 = ^TBlock128;
 
-/// compute a 128-bit checksum on the supplied buffer using crc32c
+/// compute a 128-bit checksum on the supplied buffer, cascading two crc32c
 // - will use SSE 4.2 hardware accelerated instruction, if available
 // - will combine two crc32c() calls into a single TAESBlock result
 // - by design, such combined hashes cannot be cascaded
 procedure crc128c(buf: PAnsiChar; len: cardinal; out crc: THash128);
 
 /// compute a proprietary 128-bit CRC of a 128-bit binary buffer
+// - apply four crc32c() calls on the 128-bit input chunk, into a 128-bit crc
+// - its output won't match crc128c() value, which works on 8-bit input
 // - will use SSE 4.2 hardware accelerated instruction, if available
 // - is used e.g. by SynCrypto's TAESCFBCRC to check for data integrity
 procedure crcblock(crc128, data128: PBlock128);
 
 /// compute a proprietary 128-bit CRC of 128-bit binary buffers
+// - apply four crc32c() calls on the 128-bit input chunks, into a 128-bit crc
+// - its output won't match crc128c() value, which works on 8-bit input
 // - will use SSE 4.2 hardware accelerated instruction, if available
 // - is used e.g. by SynEcc's TECDHEProtocol.ComputeMAC for macCrc128c
 procedure crcblocks(crc128, data128: PBlock128; count: integer);
@@ -13527,7 +13531,8 @@ function VariantLoad(const Bin: RawByteString;
 // a temporary copy or the overloaded functions with RawUTF8 parameter
 // if you need to access it later
 function VariantLoadJSON(var Value: variant; JSON: PUTF8Char;
-  EndOfObject: PUTF8Char=nil; TryCustomVariants: PDocVariantOptions=nil): PUTF8Char; overload;
+  EndOfObject: PUTF8Char=nil; TryCustomVariants: PDocVariantOptions=nil;
+  AllowDouble: boolean=false): PUTF8Char; overload;
 
 /// retrieve a variant value from a JSON number or string
 // - follows TTextWriter.AddVariant() format (calls GetVariantFromJSON)
@@ -13540,7 +13545,7 @@ function VariantLoadJSON(var Value: variant; JSON: PUTF8Char;
 // - this overloaded procedure will make a temporary copy before JSON parsing
 // and return the variant as result
 procedure VariantLoadJSON(var Value: Variant; const JSON: RawUTF8;
-  TryCustomVariants: PDocVariantOptions=nil); overload;
+  TryCustomVariants: PDocVariantOptions=nil; AllowDouble: boolean=false); overload;
 
 /// retrieve a variant value from a JSON number or string
 // - follows TTextWriter.AddVariant() format (calls GetVariantFromJSON)
@@ -13553,7 +13558,7 @@ procedure VariantLoadJSON(var Value: Variant; const JSON: RawUTF8;
 // - this overloaded procedure will make a temporary copy before JSON parsing
 // and return the variant as result
 function VariantLoadJSON(const JSON: RawUTF8;
-  TryCustomVariants: PDocVariantOptions=nil): variant; overload;
+  TryCustomVariants: PDocVariantOptions=nil; AllowDouble: boolean=false): variant; overload;
 
 /// save a variant value into a JSON content
 // - follows the TTextWriter.AddVariant() and VariantLoadJSON() format
@@ -31148,18 +31153,18 @@ begin
 @s:     mov     eax, dword ptr[ecx]
         db      $F2, $0F, $38, $F1, $02
         mov     dword ptr[ecx], eax
-        mov     eax, dword ptr[ecx+4]
+        mov     eax, dword ptr[ecx + 4]
         db      $F2, $0F, $38, $F1, $42, $04
-        mov     dword ptr[ecx+4], eax
-        mov     eax, dword ptr[ecx+8]
+        mov     dword ptr[ecx + 4], eax
+        mov     eax, dword ptr[ecx + 8]
         db      $F2, $0F, $38, $F1, $42, $08
-        mov     dword ptr[ecx+8], eax
-        mov     eax, dword ptr[ecx+12]
+        mov     dword ptr[ecx + 8], eax
+        mov     eax, dword ptr[ecx + 12]
         db      $F2, $0F, $38, $F1, $42, $0C
-        mov     dword ptr[ecx+12], eax
+        mov     dword ptr[ecx + 12], eax
         dec     count
-        lea     edx, [edx+16]
-        jnz @s
+        lea     edx, [edx + 16]
+        jnz     @s
   end else
   while count>0 do begin
     crcblockpas(crc128,data128);
@@ -31262,56 +31267,56 @@ asm
 asm // rcx=crc128, rdx=data128 (Linux: rdi,rsi)
         .NOFRAME
 {$endif FPC}
-        test    byte ptr [rip + CpuFeatures+6], $10 // cfSSE42 in CpuFeatures
+        test    byte ptr[rip + CpuFeatures + 6], $10 // cfSSE42 in CpuFeatures
         jz      crcblockpas
         {$ifdef Linux}
         mov     rcx, rdi
         mov     rdx, rsi
         {$endif Linux}
         mov     eax, dword ptr[rcx]
-        mov     r8d, dword ptr[rcx+4]
-        mov     r9d, dword ptr[rcx+8]
-        mov     r10d, dword ptr[rcx+12]
+        mov     r8d, dword ptr[rcx + 4]
+        mov     r9d, dword ptr[rcx + 8]
+        mov     r10d, dword ptr[rcx + 12]
         crc32   eax, dword ptr[rdx]
-        crc32   r8d, dword ptr[rdx+4]
-        crc32   r9d, dword ptr[rdx+8]
-        crc32   r10d, dword ptr[rdx+12]
+        crc32   r8d, dword ptr[rdx + 4]
+        crc32   r9d, dword ptr[rdx + 8]
+        crc32   r10d, dword ptr[rdx + 12]
         mov     dword ptr[rcx], eax
-        mov     dword ptr[rcx+4], r8d
-        mov     dword ptr[rcx+8], r9d
-        mov     dword ptr[rcx+12], r10d
+        mov     dword ptr[rcx + 4], r8d
+        mov     dword ptr[rcx + 8], r9d
+        mov     dword ptr[rcx + 12], r10d
 end;
 {$else}
 asm // eax=crc128, edx=data128
-        test    byte ptr [CpuFeatures+6], $10 // cfSSE42 in CpuFeatures
+        test    byte ptr[CpuFeatures + 6], $10 // cfSSE42 in CpuFeatures
         mov     ecx, eax
         jz      crcblockpas
         {$ifdef ISDELPHI2010}
         mov     eax, dword ptr[ecx]
         crc32   eax, dword ptr[edx]
         mov     dword ptr[ecx], eax
-        mov     eax, dword ptr[ecx+4]
-        crc32   eax, dword ptr[edx+4]
-        mov     dword ptr[ecx+4], eax
-        mov     eax, dword ptr[ecx+8]
-        crc32   eax, dword ptr[edx+8]
-        mov     dword ptr[ecx+8], eax
-        mov     eax, dword ptr[ecx+12]
-        crc32   eax, dword ptr[edx+12]
-        mov     dword ptr[ecx+12], eax
+        mov     eax, dword ptr[ecx + 4]
+        crc32   eax, dword ptr[edx + 4]
+        mov     dword ptr[ecx + 4], eax
+        mov     eax, dword ptr[ecx + 8]
+        crc32   eax, dword ptr[edx + 8]
+        mov     dword ptr[ecx + 8], eax
+        mov     eax, dword ptr[ecx + 12]
+        crc32   eax, dword ptr[edx + 12]
+        mov     dword ptr[ecx + 12], eax
         {$else}
         mov     eax, dword ptr[ecx]
         db      $F2, $0F, $38, $F1, $02
         mov     dword ptr[ecx], eax
-        mov     eax, dword ptr[ecx+4]
+        mov     eax, dword ptr[ecx + 4]
         db      $F2, $0F, $38, $F1, $42, $04
-        mov     dword ptr[ecx+4], eax
-        mov     eax, dword ptr[ecx+8]
+        mov     dword ptr[ecx + 4], eax
+        mov     eax, dword ptr[ecx + 8]
         db      $F2, $0F, $38, $F1, $42, $08
-        mov     dword ptr[ecx+8], eax
-        mov     eax, dword ptr[ecx+12]
+        mov     dword ptr[ecx + 8], eax
+        mov     eax, dword ptr[ecx + 12]
         db      $F2, $0F, $38, $F1, $42, $0C
-        mov     dword ptr[ecx+12], eax
+        mov     dword ptr[ecx + 12], eax
         {$endif}
 end;
 {$endif CPU64}
@@ -38517,7 +38522,7 @@ end;
 /// internal method used by VariantLoadJSON(), GetVariantFromJSON() and
 // TDocVariantData.InitJSONInPlace()
 procedure GetJSONToAnyVariant(var Value: variant; var JSON: PUTF8Char;
-  EndOfObject: PUTF8Char; Options: PDocVariantOptions); forward;
+  EndOfObject: PUTF8Char; Options: PDocVariantOptions; AllowDouble: boolean); forward;
 
 procedure SetVariantByRef(const Source: Variant; var Dest: Variant);
 begin
@@ -38816,7 +38821,7 @@ begin
           try
             JSON := tmp.buf;
             VType := varEmpty; // avoid GPF below
-            GetJSONToAnyVariant(Value,JSON,nil,CustomVariantOptions);
+            GetJSONToAnyVariant(Value,JSON,nil,CustomVariantOptions,false);
           finally
             tmp.Done;
           end;
@@ -38837,8 +38842,8 @@ begin
   Source := PByte(VariantLoad(Value,PAnsiChar(Source),CustomVariantOptions));
 end;
 
-function VariantLoadJSON(var Value: variant; JSON: PUTF8Char;
-  EndOfObject: PUTF8Char; TryCustomVariants: PDocVariantOptions): PUTF8Char;
+function VariantLoadJSON(var Value: variant; JSON: PUTF8Char; EndOfObject: PUTF8Char;
+  TryCustomVariants: PDocVariantOptions; AllowDouble: boolean): PUTF8Char;
 var wasString: boolean;
     Val: PUTF8Char;
 begin
@@ -38850,37 +38855,42 @@ begin
       JSON := GotoNextNotSpace(JSON);
       if JSON^='"' then begin
         Val := GetJSONField(result,result,@wasString,EndOfObject);
-        GetJSONToAnyVariant(Value,Val,EndOfObject,TryCustomVariants);
+        GetJSONToAnyVariant(Value,Val,EndOfObject,TryCustomVariants,false);
       end else
-        GetJSONToAnyVariant(Value,result,EndOfObject,TryCustomVariants);
+        GetJSONToAnyVariant(Value,result,EndOfObject,TryCustomVariants,false);
     end else
-      GetJSONToAnyVariant(Value,result,EndOfObject,TryCustomVariants);
+      GetJSONToAnyVariant(Value,result,EndOfObject,TryCustomVariants,false);
   end else begin
     Val := GetJSONField(result,result,@wasString,EndOfObject);
+<<<<<<< HEAD
     GetVariantFromJSON(Val,wasString,Value{$ifdef FPC},nil,true{$endif});
+=======
+    GetVariantFromJSON(Val,wasString,Value,nil,AllowDouble);
+>>>>>>> refs/remotes/synopse/master
   end;
   if result=nil then
     result := @NULCHAR;
 end;
 
 procedure VariantLoadJSON(var Value: Variant; const JSON: RawUTF8;
-  TryCustomVariants: PDocVariantOptions);
+  TryCustomVariants: PDocVariantOptions; AllowDouble: boolean);
 var tmp: TSynTempBuffer;
 begin
   tmp.Init(JSON);
   try
-    VariantLoadJSON(Value,tmp.buf,nil,TryCustomVariants);
+    VariantLoadJSON(Value,tmp.buf,nil,TryCustomVariants,AllowDouble);
   finally
     tmp.Done;
   end;
 end;
 
-function VariantLoadJSON(const JSON: RawUTF8; TryCustomVariants: PDocVariantOptions): variant;
+function VariantLoadJSON(const JSON: RawUTF8; TryCustomVariants: PDocVariantOptions;
+  AllowDouble: boolean): variant;
 var tmp: TSynTempBuffer;
 begin
   tmp.Init(JSON);
   try
-    VariantLoadJSON(result,tmp.buf,nil,TryCustomVariants);
+    VariantLoadJSON(result,tmp.buf,nil,TryCustomVariants,AllowDouble);
   finally
     tmp.Done;
   end;
@@ -39208,13 +39218,13 @@ begin
 end;
 
 procedure GetJSONToAnyVariant(var Value: variant; var JSON: PUTF8Char;
-  EndOfObject: PUTF8Char; Options: PDocVariantOptions);
+  EndOfObject: PUTF8Char; Options: PDocVariantOptions; AllowDouble: boolean);
 // internal method used by VariantLoadJSON(), GetVariantFromJSON() and
 // TDocVariantData.InitJSON()
 var wasString: boolean;
   procedure ProcessSimple(Val: PUTF8Char);
   begin
-    GetVariantFromJSON(Val,wasString,Value);
+    GetVariantFromJSON(Val,wasString,Value,nil,AllowDouble);
     if JSON=nil then
       JSON := @NULCHAR;
   end;
@@ -39232,6 +39242,8 @@ begin
     ProcessSimple(GetJSONField(JSON,JSON,@wasString,EndOfObject));
     exit;
   end;
+  if dvoAllowDoubleValue in Options^ then
+    AllowDouble := true; // for ProcessSimple() above
   if JSON^='"' then
     if dvoJSONObjectParseWithinString in Options^ then begin
       ToBeParsed := GetJSONField(JSON,JSON,@wasString,EndOfObject);
@@ -39414,7 +39426,7 @@ begin
   // (e.g. when called directly from TSQLPropInfoRTTIVariant.SetValue)
   if (TryCustomVariants<>nil) and (JSON<>nil) then
     if JSON^ in ['{','['] then begin
-      GetJSONToAnyVariant(Value,JSON,nil,TryCustomVariants);
+      GetJSONToAnyVariant(Value,JSON,nil,TryCustomVariants,false);
       exit;
     end else
     AllowDouble := dvoAllowDoubleValue in TryCustomVariants^;
@@ -39972,7 +39984,7 @@ begin
       repeat
         if VCount>=n then
           exit; // unexpected array size means invalid JSON
-        GetJSONToAnyVariant(VValue[VCount],JSON,@EndOfObject,@VOptions);
+        GetJSONToAnyVariant(VValue[VCount],JSON,@EndOfObject,@VOptions,false);
         if JSON=nil then
           exit;
         inc(VCount);
@@ -39999,7 +40011,7 @@ begin
         if Name=nil then
           exit;
         SetString(VName[VCount],PAnsiChar(Name),StrLen(Name));
-        GetJSONToAnyVariant(VValue[VCount],JSON,@EndOfObject,@VOptions);
+        GetJSONToAnyVariant(VValue[VCount],JSON,@EndOfObject,@VOptions,false);
         if JSON=nil then
           exit;
         inc(VCount);
