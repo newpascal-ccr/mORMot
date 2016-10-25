@@ -38862,11 +38862,7 @@ begin
       GetJSONToAnyVariant(Value,result,EndOfObject,TryCustomVariants,false);
   end else begin
     Val := GetJSONField(result,result,@wasString,EndOfObject);
-<<<<<<< HEAD
-    GetVariantFromJSON(Val,wasString,Value{$ifdef FPC},nil,true{$endif});
-=======
     GetVariantFromJSON(Val,wasString,Value,nil,AllowDouble);
->>>>>>> refs/remotes/synopse/master
   end;
   if result=nil then
     result := @NULCHAR;
