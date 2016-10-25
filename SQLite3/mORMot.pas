@@ -29207,6 +29207,24 @@ begin
   result := PtrUInt(P)-PtrUInt(@self);
 end;
 
+{$ifdef HASDIRECTTYPEINFO}
+// asm could also be adjusted for this, but this is the easy way ... ;-)
+// for the upcoming fpc 3.0.2 / fixes
+function TClassType.InheritsFrom(AClass: TClass): boolean;
+var P: PTypeInfo;
+begin
+  result := true;
+  if ClassType=AClass then
+    exit;
+  P := DeRef(ParentInfo);
+  while P<>nil do
+    with P^.ClassType^ do
+    if ClassType=AClass then
+      exit else
+      P := DeRef(ParentInfo);
+  result := false;
+end;
+{$else}
 {$ifdef PUREPASCAL}
 function TClassType.InheritsFrom(AClass: TClass): boolean;
 var P: PTypeInfo;
@@ -29238,6 +29256,7 @@ asm // eax=PClassType edx=AClass
 @3:     mov     eax, 1
 @0:
 end;
+{$endif}
 {$endif}
 
 

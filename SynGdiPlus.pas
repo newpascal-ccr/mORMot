@@ -123,7 +123,17 @@ unit SynGdiPlus;
 interface
 
 uses
-  Windows, Classes, SysUtils,
+  {$IFDEF FPC}
+  LCLType, LCLIntf,
+  mymetafile,
+  {$ENDIF}
+  {$IFDEF MSWINDOWS}
+  Windows, CommCtrl, Messages,
+  {$ENDIF}
+  {$ifdef FPC}
+  LResources,
+  {$endif}
+  Classes, SysUtils,
   {$ifdef ISDELPHIXE2}
   VCL.Graphics,
   {$else}
@@ -388,12 +398,21 @@ type
     function GetWidth: Integer; override;
     procedure SetHeight(Value: Integer); override;
     procedure SetWidth(Value: Integer); override;
+    {$ifndef FPC}
     procedure Clear;
+    {$endif}
     procedure fImageSet;
     procedure BitmapSetResolution(DPI: single);
+    {$ifdef FPC}
+    function GetTransparent: Boolean; override;
+    procedure SetTransparent(Value: Boolean); override;
+    {$endif}
   public
     constructor CreateFromFile(const FileName: string);
     destructor Destroy; override;
+    {$ifdef FPC}
+    procedure Clear; override;
+    {$endif}
     procedure Assign(Source: TPersistent); override;
     procedure Draw(ACanvas: TCanvas; const Rect: TRect); override;
 {$ifdef USEDPI}
@@ -406,11 +425,17 @@ type
     procedure LoadFromBuffer(Buffer: pointer; Len: integer);
     procedure SaveToStream(Stream: TStream); override;
     procedure SaveInternalToStream(Stream: TStream);
-    procedure LoadFromResourceName(Instance: THandle; const ResName: string);
+
+    procedure LoadFromResourceName(Instance: THandle; const ResName: string);{$ifdef FPC} override;{$endif}
+    {$ifdef FPC}
+    procedure LoadFromClipboardFormat(FormatID: TClipboardFormat); override;
+    procedure SaveToClipboardFormat(FormatID: TClipboardFormat); override;
+    {$else}
     procedure LoadFromClipboardFormat(AFormat: Word; AData: THandle;
       APalette: HPALETTE); override;
     procedure SaveToClipboardFormat(var AFormat: Word; var AData: THandle;
       var APalette: HPALETTE); override;
+    {$endif}
     /// save the picture into any GIF/PNG/JPG/TIFF format
     // - CompressionQuality is used for gptJPG format saving
     // and is expected to be from 0 to 100; for gptTIF format, use
@@ -718,7 +743,6 @@ procedure GdipUnlock;
 
 
 implementation
-
 
 {
 // Common GDI+ color constants
@@ -1162,6 +1186,9 @@ end;
 
 procedure TSynPicture.Clear;
 begin
+  {$ifdef FPC}
+  inherited;
+  {$endif}
   fHasContent := false;
   fAssignedFromBitmap := false;
   fWidth := 0;
@@ -1293,10 +1320,23 @@ begin
     end;
 end;
 
+{$ifdef FPC}
+procedure TSynPicture.LoadFromClipboardFormat(FormatID: TClipboardFormat);
+begin // not implemented
+end;
+procedure TSynPicture.SaveToClipboardFormat(FormatID: TClipboardFormat);
+begin // not implemented
+end;
+{$else}
 procedure TSynPicture.LoadFromClipboardFormat(AFormat: Word;
   AData: THandle; APalette: HPALETTE);
 begin // not implemented
 end;
+procedure TSynPicture.SaveToClipboardFormat(var AFormat: Word;
+  var AData: THandle; var APalette: HPALETTE);
+begin // not implemented
+end;
+{$endif}
 
 procedure TSynPicture.LoadFromFile(const FileName: string);
 var FS: TFileStream;
@@ -1423,7 +1463,7 @@ const
 function TSynPicture.SaveAs(Stream: TStream; Format: TGDIPPictureType;
   CompressionQuality: integer; IfBitmapSetResolution: single): TGdipStatus;
 var fStream: IStream;
-    Len,Dummy: {$ifdef ISDELPHIXE8}LargeUInt{$else}Int64{$endif};
+    Len,Dummy: {$ifdef FPC}QWord;{$else}{$ifdef ISDELPHIXE8}LargeUInt{$else}Int64{$endif};{$endif}
     tmp: pointer;
     Params: TEncoderParameters;
     PParams: pointer;
@@ -1500,11 +1540,6 @@ begin
   end;
 end;
 
-procedure TSynPicture.SaveToClipboardFormat(var AFormat: Word;
-  var AData: THandle; var APalette: HPALETTE);
-begin // not implemented
-end;
-
 procedure TSynPicture.SaveToStream(Stream: TStream);
 begin
   SaveInternalToStream(Stream);
@@ -1529,6 +1564,17 @@ begin
     result.Canvas.Draw(0,0,self);
   end;
 end;
+
+{$ifdef FPC}
+function TSynPicture.GetTransparent: Boolean;
+begin // not implemented
+  result:=false;
+end;
+
+procedure TSynPicture.SetTransparent(Value: Boolean);
+begin // not implemented
+end;
+{$endif}
 
 
 { TJpegImage }
@@ -1656,7 +1702,7 @@ type RawByteString = AnsiString;
 procedure SaveAsRawByteString(Graphic: TPersistent;
   out DataRawByteString{$ifdef HASCODEPAGE}: RawByteString{$endif};
   Format: TGDIPPictureType; CompressionQuality: integer=80;
-  MaxPixelsForBiggestSide: cardinal=0; BitmapSetResolution: single=0); overload;
+  MaxPixelsForBiggestSide: cardinal=0; BitmapSetResolution: single=0);{$ifndef FPC}overload;{$endif}
 {$ifdef UNICODE}
 var Stream: TMemoryStream;
 begin
@@ -1991,7 +2037,52 @@ end;
 
  { TGDIPlusEnum }
 
+{$ifdef FPC}
+const
+  EMR_HEADER = 1;
+  EMR_POLYBEZIER = 2;
+  EMR_POLYGON = 3;
+  EMR_POLYLINE = 4;
+  EMR_SETWINDOWEXTEX = 9;
+  EMR_SETWINDOWORGEX = 10;
+  EMR_SETVIEWPORTEXTEX = 11;
+  EMR_SETVIEWPORTORGEX = 12;
+  EMR_SETBKMODE = 18;
+  EMR_SETTEXTALIGN = 22;
+  EMR_SETTEXTCOLOR = 24;
+  EMR_SETBKCOLOR = 25;
+  EMR_OFFSETCLIPRGN = 26;
+  EMR_MOVETOEX = 27;
+  EMR_EXCLUDECLIPRECT = 29;
+  EMR_INTERSECTCLIPRECT = 30;
+  EMR_SAVEDC = 33;
+  EMR_RESTOREDC = 34;
+  EMR_SETWORLDTRANSFORM = 35;
+  EMR_SELECTOBJECT = 37;
+  EMR_CREATEPEN = 38;
+  EMR_CREATEBRUSHINDIRECT = 39;
+  EMR_DELETEOBJECT = 40;
+  EMR_ELLIPSE = 42;
+  EMR_RECTANGLE = 43;
+  EMR_ROUNDRECT = 44;
+  EMR_LINETO = 54;
+  EMR_SELECTCLIPPATH = 67;
+  EMR_EXTSELECTCLIPRGN = 75;
+  EMR_BITBLT = 76;
+  EMR_STRETCHBLT = 77;
+  EMR_STRETCHDIBITS = 81;
+  EMR_EXTCREATEFONTINDIRECTW = 82;
+  EMR_EXTTEXTOUTW = 84;
+  EMR_POLYBEZIER16 = 85;
+  EMR_POLYGON16 = 86;
+  EMR_POLYLINE16 = 87;
+{$endif}
+
 type
+  {$ifdef FPC}
+  TEMRExtTextOut = TEMREXTTEXTOUTA;
+  {$endif}
+
   /// expected font specifications
   TFontSpec = packed record
     angle: smallint; // -360..+360
@@ -2003,9 +2094,9 @@ type
   /// one DC state properties
   TGDIPlusEnumState = record
     pen, brush, font, ClipRegion: THandle;
-    move: TPoint;
+    move: {$ifdef FPC}TPointL{$else}TPoint{$endif};
     WinSize, ViewSize: TSize;
-    WinOrg, ViewOrg: TPoint;
+    WinOrg, ViewOrg: {$ifdef FPC}TPointL{$else}TPoint{$endif};
     fontColor, fontAlign: integer;
     fontSpec: TFontSpec;
     BkMode, BkColor: cardinal;
@@ -2085,7 +2176,7 @@ begin
   end;
 end;
 
-procedure NormalizeRect(var Rect: TRect);
+procedure NormalizeRect(var Rect: {$ifdef FPC}TRECTL{$else}TRect{$endif});
 var tmp: integer;
 begin // GDI+ can't draw twisted rects -> normalize such values
   if Rect.Right<Rect.Left then begin
@@ -2142,7 +2233,11 @@ begin
       Ref.gdip.DeleteMatrix(matrixOrg);
     end;
   EMR_EXTCREATEFONTINDIRECTW:
+    {$ifdef FPC}
+    with PEMRExtCreateFontIndirectW(Rec)^ do begin
+    {$else}
     with PEMRExtCreateFontIndirect(Rec)^ do begin
+    {$endif}
       Ref.DeleteObj(ihFont-1);
       with Ref.obj[ihFont-1] do begin
         kind := OBJ_FONT;
@@ -2193,7 +2288,11 @@ begin
   EMR_SETTEXTALIGN:
     fontAlign := PEMRSetTextAlign(Rec)^.iMode;
   EMR_EXTTEXTOUTW:
+    {$ifdef FPC}
+    Ref.DrawText(PEMRExtTextOutW(Rec)^);
+    {$else}
     Ref.DrawText(PEMRExtTextOut(Rec)^);
+    {$endif}
   EMR_MOVETOEX:
     move := PEMRMoveToEx(Rec)^.ptl;
   EMR_LINETO: begin
@@ -2257,7 +2356,11 @@ begin
     with PEMRPolyLine16(Rec)^ do begin
       Points16To32(@apts,P32,cpts);
       Ref.gdip.DrawLines(Ref.graphics,Pen,P32,cpts);
+      {$ifdef FPC}
+      move := PPointL(PAnsiChar(P32)+(cpts-1)*8)^;
+      {$else}
       move := PPoint(PAnsiChar(P32)+(cpts-1)*8)^;
+      {$endif}
       FreeMem(P32);
     end;
   EMR_POLYBEZIER:
@@ -2269,7 +2372,11 @@ begin
     with PEMRPolyBezier16(Rec)^ do begin
       Points16To32(@apts,P32,cpts);
       Ref.gdip.DrawCurve(Ref.graphics,Pen,P32,cpts);
+      {$ifdef FPC}
+      move := PPointL(PAnsiChar(P32)+(cpts-1)*8)^;
+      {$else}
       move := PPoint(PAnsiChar(P32)+(cpts-1)*8)^;
+      {$endif}
       FreeMem(P32);
     end;
   EMR_BITBLT: begin
@@ -2757,7 +2864,7 @@ begin
 end;
 
 initialization
-  InitializeCriticalSection(GdipCS);
+  Windows.InitializeCriticalSection(GdipCS);
 {$ifndef NOTSYNPICTUREREGISTER}
   Gdip.RegisterPictures; // will initialize the Gdip library if necessary
 //  GdipTest('d:\Data\Pictures\Sample Pictures\Tree.jpg');
@@ -2765,5 +2872,5 @@ initialization
 
 finalization
   Gdip.Free;
-  DeleteCriticalSection(GdipCS);
+  Windows.DeleteCriticalSection(GdipCS);
 end.

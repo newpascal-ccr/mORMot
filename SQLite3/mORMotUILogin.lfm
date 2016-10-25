@@ -1,0 +1,75 @@
+object LoginForm: TLoginForm
+  Left = 360
+  Height = 201
+  Top = 132
+  Width = 316
+  BorderIcons = [biSystemMenu]
+  BorderStyle = bsSingle
+  ClientHeight = 201
+  ClientWidth = 316
+  Color = clBtnFace
+  Font.Color = clWindowText
+  Font.Height = -12
+  Font.Name = 'Tahoma'
+  OnCreate = FormCreate
+  OnShow = FormShow
+  Position = poScreenCenter
+  LCLVersion = '1.7'
+  object Label1: TLabel
+    Left = 16
+    Height = 14
+    Top = 93
+    Width = 66
+    Anchors = [akLeft, akBottom]
+    Caption = '&User name: '
+    ParentColor = False
+  end
+  object Label2: TLabel
+    Left = 16
+    Height = 14
+    Top = 125
+    Width = 55
+    Anchors = [akLeft, akBottom]
+    Caption = '&Password:'
+    FocusControl = Edit2
+    ParentColor = False
+  end
+  object Image1: TImage
+    Left = 0
+    Height = 60
+    Top = 0
+    Width = 316
+    Align = alTop
+  end
+  object Label3: TLabel
+    Left = 0
+    Height = 18
+    Top = 68
+    Width = 6
+    Alignment = taCenter
+    AutoSize = False
+    Font.Color = 8912896
+    Font.Height = -13
+    Font.Name = 'Tahoma'
+    ParentColor = False
+    ParentFont = False
+  end
+  object Bevel1: TBevel
+    Left = 0
+    Height = 9
+    Top = 80
+    Width = 321
+    Anchors = [akTop, akLeft, akRight]
+    Shape = bsBottomLine
+  end
+  object Edit2: TEdit
+    Left = 104
+    Height = 22
+    Top = 125
+    Width = 193
+    Anchors = [akLeft, akBottom]
+    EchoMode = emPassword
+    PasswordChar = '*'
+    TabOrder = 0
+  end
+end

@@ -155,6 +155,13 @@ uses
   {$ENDIF}
   ;
 
+const
+  SMsgDlgWarning = 'Warning';
+  SMsgDlgError = 'Error';
+  SMsgDlgInformation = 'Information';
+  SMsgDlgConfirm = 'Confirm';
+
+
 var
   /// will map a generic Arrow picture from SynTaskDialog.res
   {$IFNDEF FMX}
@@ -309,7 +316,7 @@ type
   // !  if Task.VerifyChecked then
   // !    ShowMessage(Task.Verify);
   // !end;
-  {$ifdef UNICODE}
+  {$ifndef UNICODE}
   TTaskDialog = record
   {$else}
   TTaskDialog = object
@@ -480,6 +487,11 @@ type
     fDropDownMenu: TSynPopupMenu;
 {$endif}
   public
+    /// create a standard button instance
+    // - ModalResult/Default/Cancel properties will be set as exepcted for this
+    // kind of button
+    constructor CreateKind(Owner: TWinControl; Btn: TCommonButton;
+      Left, Right, Width, Height: integer);
     /// set the glyph of the button
     // - set nothing under Delphi 6
     procedure SetBitmap(Bmp: TBitmap);
@@ -612,6 +624,25 @@ begin
 end;
 
 { TSynButton }
+
+constructor TSynButton.CreateKind(Owner: TWinControl; Btn: TCommonButton;
+  Left, Right, Width, Height: integer);
+begin
+  Create(Owner);
+  Parent := Owner;
+  SetBounds(Left,Right,Width,Height);
+  Caption := LoadResString(TD_BTNS(Btn));
+  ModalResult := TD_BTNMOD[Btn];
+  case Btn of
+    cbOK:     Default := true;
+    cbCancel: Cancel := true;
+  end;
+  {
+  case Btn of
+    cbOK: SetBitmap(BitmapOK);
+  end;
+  }
+end;
 
 {$ifndef USETMSPACK}
 procedure TSynButton.DoDropDown;
@@ -1070,7 +1101,7 @@ begin
   {$ELSE}
     if Screen.ActiveCustomForm<>nil then
       aParent := Screen.ActiveCustomForm.Handle else
-      aParent := {$ifndef fpc}Application.Handle{$else}0{$endif};
+      aParent := {$ifndef fpc}Application.Handle{$else}Application.MainFormHandle{$endif};
   {$ENDIF}
   if not TaskDialog_ForceEmulation and
      Assigned(TaskDialogIndirect) and not aNonNative
