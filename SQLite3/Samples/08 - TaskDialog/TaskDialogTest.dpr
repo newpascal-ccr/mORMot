@@ -11,6 +11,7 @@ uses
   SysUtils,
   {$ifdef FPC}
   SynTaskDialog in '..\..\Samples\ThirdPartyDemos\Ondrej\SynTaskDialog4Lazarus\SynTaskDialog.pas',
+  win32extra,  // for TaskDialogIndirect
   {$else}
   SynTaskDialog,
   {$endif}

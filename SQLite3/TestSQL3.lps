@@ -3,7 +3,7 @@
   <ProjectSession>
     <PathDelim Value="\"/>
     <Version Value="9"/>
-    <BuildModes Count="4">
+    <BuildModes Count="4" Active="win32">
       <Item1 Name="void">
         <CompilerOptions>
           <Version Value="11"/>
@@ -139,18 +139,21 @@
         </CompilerOptions>
       </Item4>
     </BuildModes>
-    <Units Count="4">
+    <Units Count="7">
       <Unit0>
         <Filename Value="TestSQL3.dpr"/>
         <IsPartOfProject Value="True"/>
-        <IsVisibleTab Value="True"/>
+        <TopLine Value="85"/>
+        <CursorPos X="9" Y="105"/>
         <UsageCount Value="471"/>
         <Loaded Value="True"/>
         <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit0>
       <Unit1>
         <Filename Value="..\SynSelfTests.pas"/>
-        <EditorIndex Value="2"/>
+        <EditorIndex Value="3"/>
+        <TopLine Value="14258"/>
+        <CursorPos X="70" Y="14278"/>
         <UsageCount Value="235"/>
         <Loaded Value="True"/>
         <DefaultSyntaxHighlighter Value="Delphi"/>
@@ -165,21 +168,87 @@
       </Unit2>
       <Unit3>
         <Filename Value="mORMotSelfTests.pas"/>
-        <EditorIndex Value="1"/>
+        <EditorIndex Value="2"/>
+        <TopLine Value="43"/>
+        <CursorPos X="8" Y="68"/>
         <UsageCount Value="10"/>
         <Loaded Value="True"/>
         <DefaultSyntaxHighlighter Value="Delphi"/>
       </Unit3>
+      <Unit4>
+        <Filename Value="mORMot.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="56263"/>
+        <CursorPos X="24" Y="56281"/>
+        <UsageCount Value="10"/>
+        <DefaultSyntaxHighlighter Value="Delphi"/>
+      </Unit4>
+      <Unit5>
+        <Filename Value="..\Synopse.inc"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="274"/>
+        <CursorPos X="7" Y="288"/>
+        <UsageCount Value="10"/>
+        <DefaultSyntaxHighlighter Value="Delphi"/>
+      </Unit5>
+      <Unit6>
+        <Filename Value="..\SynCommons.pas"/>
+        <IsVisibleTab Value="True"/>
+        <EditorIndex Value="1"/>
+        <TopLine Value="44114"/>
+        <CursorPos X="22" Y="44141"/>
+        <UsageCount Value="10"/>
+        <Loaded Value="True"/>
+        <DefaultSyntaxHighlighter Value="Delphi"/>
+      </Unit6>
     </Units>
-    <JumpHistory Count="2" HistoryIndex="1">
+    <JumpHistory Count="12" HistoryIndex="11">
       <Position1>
-        <Filename Value="TestSQL3.dpr"/>
-        <Caret Line="177" Column="8" TopLine="154"/>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="13921" Column="51" TopLine="13901"/>
       </Position1>
       <Position2>
-        <Filename Value="TestSQL3.dpr"/>
-        <Caret Line="137" Column="18" TopLine="130"/>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="14084" Column="82" TopLine="14064"/>
       </Position2>
+      <Position3>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="14189" Column="57" TopLine="14169"/>
+      </Position3>
+      <Position4>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="14270" Column="64" TopLine="14250"/>
+      </Position4>
+      <Position5>
+        <Filename Value="..\SynSelfTests.pas"/>
+        <Caret Line="14278" Column="70" TopLine="14258"/>
+      </Position5>
+      <Position6>
+        <Filename Value="mORMotSelfTests.pas"/>
+        <Caret Line="68" Column="8" TopLine="43"/>
+      </Position6>
+      <Position7>
+        <Filename Value="TestSQL3.dpr"/>
+        <Caret Line="105" Column="9" TopLine="85"/>
+      </Position7>
+      <Position8>
+        <Filename Value="..\SynCommons.pas"/>
+      </Position8>
+      <Position9>
+        <Filename Value="..\SynCommons.pas"/>
+        <Caret Line="43805" Column="42" TopLine="43778"/>
+      </Position9>
+      <Position10>
+        <Filename Value="..\SynCommons.pas"/>
+        <Caret Line="44141" Column="22" TopLine="44114"/>
+      </Position10>
+      <Position11>
+        <Filename Value="..\SynCommons.pas"/>
+      </Position11>
+      <Position12>
+        <Filename Value="..\SynCommons.pas"/>
+        <Caret Line="43805" Column="42" TopLine="43778"/>
+      </Position12>
     </JumpHistory>
   </ProjectSession>
 </CONFIG>

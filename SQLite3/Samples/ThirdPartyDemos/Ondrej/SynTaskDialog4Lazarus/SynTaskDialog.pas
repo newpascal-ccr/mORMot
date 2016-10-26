@@ -129,6 +129,9 @@ uses
   {$ENDIF}
   {$IFDEF MSWINDOWS}
   Windows, CommCtrl, Messages,
+  {$IFDEF FPC}
+  win32extra, // for TaskDialogIndirect
+  {$ENDIF}
   {$ENDIF}
   {$ifdef FPC}
   LResources,
@@ -182,8 +185,10 @@ var
   /// is filled once in the initialization block below
   // - you can set this reference to nil to force Delphi dialogs even
   // on Vista/Seven (e.g. make sense if TaskDialogBiggerButtons=true)
+  {$ifndef FPC}
   TaskDialogIndirect: function(AConfig: pointer; Res: PInteger;
     ResRadio: PInteger; VerifyFlag: PBOOL): HRESULT; stdcall;
+  {$endif}
 {$ENDIF}
 type
   {$IFDEF FMX} // width, height, screen position
@@ -764,6 +769,7 @@ begin
 end;
 
 {$IFDEF MSWINDOWS}
+{$ifndef FPC}
 procedure InitComCtl6;
 var OSVersionInfo: TOSVersionInfo;
 begin
@@ -773,6 +779,7 @@ begin
     @TaskDialogIndirect := nil else
     @TaskDialogIndirect := GetProcAddress(GetModuleHandle(comctl32),'TaskDialogIndirect');
 end;
+{$endif}
 {$ENDIF}
 
 type
@@ -1804,7 +1811,9 @@ initialization
 
   {$ifndef USETMSPACK}
   {$IFDEF MSWINDOWS}
+  {$ifndef FPC}
   InitComCtl6;
+  {$endif}
   {$ENDIF}
   assert(ord(tdfCanBeMinimized)=15);
   {$endif USETMSPACK}
