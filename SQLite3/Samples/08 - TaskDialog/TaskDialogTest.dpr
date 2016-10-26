@@ -11,7 +11,9 @@ uses
   SysUtils,
   {$ifdef FPC}
   SynTaskDialog in '..\..\Samples\ThirdPartyDemos\Ondrej\SynTaskDialog4Lazarus\SynTaskDialog.pas',
+  {$IFDEF MSWINDOWS}
   win32extra,  // for TaskDialogIndirect
+  {$ENDIF}
   {$else}
   SynTaskDialog,
   {$endif}
@@ -136,7 +138,7 @@ begin
   Test;
   if @TaskDialogIndirect<>nil then
   begin
-    ShowMessage('Now displaying the dialogs using Delphi emulation');
+    ShowMessage('Now displaying the dialogs using TaskDialogIndirect');
     @TaskDialogIndirect := nil;
     Test;
   end;
