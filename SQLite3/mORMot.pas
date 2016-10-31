@@ -4871,6 +4871,14 @@ const
   // but a plain REST/HTTP server - e.g. for public API notifications 
   SERVICE_CONTRACT_NONE_EXPECTED = '*';
 
+  /// maximum number of methods handled by interfaces
+  // - if you think this constant is too low, you are about to break
+  // the "Interface Segregation" SOLID principle: so don't ask to increase
+  // this value, we won't allow to write un-SOLID code! :)
+  // - used e.g. to avoid creating dynamic arrays if not needed, and
+  // ease method calls
+  MAX_METHOD_COUNT = 128;
+
 
 type
   TSQLTable = class;
@@ -10837,7 +10845,9 @@ type
   TOnFakeInstanceDestroy = procedure(aClientDrivenID: cardinal) of object;
 
   /// may be used to store the Methods[] indexes of a TInterfaceFactory
-  TInterfaceFactoryMethodBits = set of 0..255;
+  // - current implementation handles up to 128 methods, a limit above
+  // which "Interface Segregation" principles is obviously broken
+  TInterfaceFactoryMethodBits = set of 0..MAX_METHOD_COUNT-1;
 
   /// a dynamic array of TInterfaceFactory instances
   TInterfaceFactoryObjArray = array of TInterfaceFactory;
@@ -12811,13 +12821,17 @@ type
     // - will register a callback if aSubscribe is true
     // - will unregister a callback if aSubscribe is false
     // - this method will be implemented as thread-safe
-    procedure Redirect(const aCallback: IInvokable; aSubscribe: boolean=true); overload;
+    // - you can specify some method names, or all redirect methods if []
+    procedure Redirect(const aCallback: IInvokable;
+      const aMethodsNames: array of RawUTF8; aSubscribe: boolean=true); overload;
     /// add or remove a class instance callback to the internal redirection list
     // - supplied aInstance should implement the interface GUID
     // - will register a callback if aSubscribe is true
     // - will unregister a callback if aSubscribe is false
     // - this method will be implemented as thread-safe
-    procedure Redirect(const aCallback: TInterfacedObject; aSubscribe: boolean=true); overload;
+    // - you can specify some method names, or all redirect methods if []
+    procedure Redirect(const aCallback: TInterfacedObject;
+      const aMethodsNames: array of RawUTF8; aSubscribe: boolean=true); overload;
   end;
 
   /// for TSQLRestCache, stores a table values
@@ -14322,8 +14336,8 @@ type
     // - this method is thread-safe
     function AsynchBatchDelete(Table: TSQLRecordClass; ID: TID): integer;
     /// define redirection of interface methods calls in one or several instances
-    // - this class allows to implements any interface via a fake class, which will
-    // redirect all methods calls into calls of one or several interfaces
+    // - this class allows to implements any interface via a fake class, which
+    // will redirect all methods calls to one or several other interfaces
     // - returned aCallbackInterface will redirect all its methods (identified
     // by aGUID) into an internal list handled by IMultiCallbackRedirect.Redirect
     // - typical use is thefore:
@@ -14334,14 +14348,12 @@ type
     // !     fSharedCallbacks := aRest.MultiRedirect(IMyService,fSharedCallback);
     // !     aServices.SubscribeForEvents(fSharedCallback);
     // !   end;
-    // !   fSharedCallbacks.Redirect(TMyCallback.Create);
+    // !   fSharedCallbacks.Redirect(TMyCallback.Create,[]);
     // !   // now each time fSharedCallback receive one event, all callbacks
     // !   // previously registered via Redirect() will receive it
     // ! ...
-    // ! destructor TMainClass.Destroy;
-    // ! begin
-    // !   fSharedCallbacks.FlushAndCallbackReleaseOnRest;
-    // !   ...
+    // !   fSharedCallbacks := nil; // will stop redirection
+    // !                            // and unregister callbacks, if needed
     function MultiRedirect(const aGUID: TGUID; out aCallbackInterface;
       aCallBackUnRegisterNeeded: boolean=true): IMultiCallbackRedirect; overload;
     /// will gather CPU and RAM information in a background thread
@@ -51249,11 +51261,11 @@ end;
 { TInterfacedObjectFake }
 
 const
-  // this is used to avoid creating dynamic arrays if not needed
-  MAX_METHOD_ARGS = 32;
-
   // QueryInterface, _AddRef and _Release methods are hard-coded
   RESERVED_VTABLE_SLOTS = 3;
+  // used e.g. to avoid creating dynamic arrays if not needed, and
+  // ease method calls
+  MAX_METHOD_ARGS = 32; // should match TInterfaceFactoryMethodBits set
 
 // see http://docwiki.embarcadero.com/RADStudio/en/Program_Control
 
@@ -52221,6 +52233,10 @@ begin
   if fMethodsCount=0 then
     raise EInterfaceFactoryException.CreateUTF8(
       '%.Create(%): interface has no RTTI',[self,fInterfaceName]);
+  if fMethodsCount>MAX_METHOD_COUNT then
+    raise EInterfaceFactoryException.CreateUTF8(
+      '%.Create(%): interface has too much method, and would break '+
+      'the interface segregation principle',[self,fInterfaceName]);
   fMethodIndexCurrentFrameCallback := -1;
   fMethodIndexCallbackReleased := -1;
   SetLength(fMethods,fMethodsCount);
@@ -53451,15 +53467,24 @@ end;
 { TInterfacedObjectMulti / TInterfacedObjectMultiList }
 
 type
+  TInterfacedObjectMultiDest = record
+    instance: IInvokable;
+    methods: TInterfaceFactoryMethodBits;
+  end;
+  TInterfacedObjectMultiDestDynArray = array of TInterfacedObjectMultiDest;
   TInterfacedObjectMulti = class;
   TInterfacedObjectMultiList = class(TInterfacedObjectLocked,
     IMultiCallbackRedirect)
   protected
-    fDest: TInterfaceDynArray;
+    fDest: TInterfacedObjectMultiDestDynArray;
+    fDests: TDynArray;
     fFakeCallback: TInterfacedObjectMulti;
-    procedure Redirect(const aCallback: IInvokable; aSubscribe: boolean); overload;
-    procedure Redirect(const aCallback: TInterfacedObject; aSubscribe: boolean); overload;
+    procedure Redirect(const aCallback: IInvokable;
+      const aMethodsNames: array of RawUTF8; aSubscribe: boolean); overload;
+    procedure Redirect(const aCallback: TInterfacedObject;
+      const aMethodsNames: array of RawUTF8; aSubscribe: boolean); overload;
     procedure CallBackUnRegister;
+    constructor Create; override;
     destructor Destroy; override;
   end;
   TInterfacedObjectMulti = class(TInterfacedObjectFakeCallback)
@@ -53476,26 +53501,40 @@ type
     procedure CallBackUnRegister;
   end;
 
+constructor TInterfacedObjectMultiList.Create;
+begin
+  inherited Create;
+  fDests.InitSpecific(TypeInfo(TInterfacedObjectMultiDestDynArray),
+    fDest,djInterface);
+end;
+
 procedure TInterfacedObjectMultiList.Redirect(const aCallback: IInvokable;
-  aSubscribe: boolean);
+  const aMethodsNames: array of RawUTF8; aSubscribe: boolean);
+var ndx: integer;
+    new: TInterfacedObjectMultiDest;
 const NAM: array[boolean] of string[11] = ('Unsubscribe','Subscribe');
 begin
   if (self=nil) or (fFakeCallback=nil) then
     exit;
   fFakeCallback.fRest.InternalLog('%.Redirect: % % using %',[ClassType,NAM[aSubscribe],
     fFakeCallback.fFactory.fInterfaceName,ObjectFromInterface(aCallback)],sllDebug);
+  fFakeCallback.fFactory.CheckMethodIndexes(aMethodsNames,true,new.methods);
+  new.instance := aCallback;
   fSafe.Lock;
   try
+    ndx := fDests.IndexOf(aCallback);
     if aSubscribe then
-      InterfaceArrayAddOnce(fDest,aCallback) else
-      InterfaceArrayDelete(fDest,aCallback);
+      if ndx<0 then
+        fDests.Add(new) else
+        fDest[ndx] := new else
+      fDests.Delete(ndx);
   finally
     fSafe.UnLock;
   end;
 end;
 
 procedure TInterfacedObjectMultiList.Redirect(const aCallback: TInterfacedObject;
-  aSubscribe: boolean);
+  const aMethodsNames: array of RawUTF8; aSubscribe: boolean);
 var dest: IInvokable;
 begin
   if (self=nil) or (fFakeCallback=nil) then
@@ -53505,7 +53544,7 @@ begin
   if not aCallback.GetInterface(fFakeCallback.fFactory.fInterfaceIID,dest) then
     raise EInterfaceFactoryException.CreateUTF8('%.Redirect [%]: % is not a %',
       [self,fFakeCallback.fName,aCallback.ClassType,fFakeCallback.fFactory.fInterfaceName]);
-  Redirect(dest,aSubscribe);
+  Redirect(dest,aMethodsNames,aSubscribe);
 end;
 
 procedure TInterfacedObjectMultiList.CallBackUnRegister;
@@ -53562,33 +53601,49 @@ end;
 function TInterfacedObjectMulti.FakeInvoke(const aMethod: TServiceMethod;
   const aParams: RawUTF8; aResult, aErrorMsg: PRawUTF8;
   aClientDrivenID: PCardinal; aServiceCustomAnswer: PServiceCustomAnswer): boolean;
-var i: integer;
+var i,m,n,d: integer;
     exec: TServiceMethodExecute;
+    instances: TPointerDynArray;
+    indexes: TIntegerDynArray;
 begin
   result := inherited FakeInvoke(aMethod,aParams,aResult,aErrorMsg,
     aClientDrivenID,aServiceCustomAnswer);
-  if not result or (fList.fDest=nil) then
+  m := aMethod.ExecutionMethodIndex-RESERVED_VTABLE_SLOTS;
+  if not result or (fList.fDest=nil) or (m<0) then
     exit;
-  exec := TServiceMethodExecute.Create(@aMethod);
+  fList.fSafe.Lock;
   try
-    exec.Options := [optIgnoreException];
-    fList.fSafe.Lock;
+    n := length(fList.fDest);
+    SetLength(indexes,n);
+    SetLength(instances,n);
+    d := 0;
+    for i := 0 to n-1 do
+      if m in fList.fDest[i].methods then begin
+        instances[d] := pointer(fList.fDest[i].instance);
+        indexes[d] := i;
+      end;
+    if instances=nil then
+      exit;
+    if d<>n then
+      SetLength(instances,d);
+    exec := TServiceMethodExecute.Create(@aMethod);
     try
-      exec.ExecuteJson(TPointerDynArray(pointer(fList.fDest)),pointer('['+aParams+']'),nil);
+      exec.Options := [optIgnoreException]; // use exec.ExecutedInstancesFailed
+      result := exec.ExecuteJson(instances,pointer('['+aParams+']'),nil);
       if exec.ExecutedInstancesFailed<>nil then
         for i := high(exec.ExecutedInstancesFailed) downto 0 do
           if exec.ExecutedInstancesFailed[i]<>'' then
           try
             fRest.InternalLog('%.FakeInvoke % failed due to % -> unsubscribe',
               [ClassType,aMethod.InterfaceDotMethodName,exec.ExecutedInstancesFailed[i]],sllDebug);
-            InterfaceArrayDelete(fList.fDest,i);
+            InterfaceArrayDelete(fList.fDest,indexes[i]);
           except // ignore any exception when releasing the (unstable?) callback
           end;
     finally
-      fList.fSafe.UnLock;
+      exec.Free;
     end;
   finally
-    exec.Free;
+    fList.fSafe.UnLock;
   end;
 end;
 

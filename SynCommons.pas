@@ -7693,6 +7693,16 @@ type
     // binary + Base64 encoding serialization (i.e. undefine custom serializer)
     class procedure RegisterCustomJSONSerializer(aTypeInfo: pointer;
       aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+    {$ifndef NOVARIANTS}
+    /// define a custom serialization for a given variant custom type
+    // - used e.g. to serialize TBCD values
+    class procedure RegisterCustomJSONSerializerForVariant(aClass: TCustomVariantType;
+      aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+    /// define a custom serialization for a given variant custom type
+    // - used e.g. to serialize TBCD values
+    class procedure RegisterCustomJSONSerializerForVariantByType(aVarType: TVarType;
+      aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+    {$endif NOVARIANTS}
     /// define a custom serialization for a given dynamic array or record
     // - the RTTI information will here be defined as plain text
     // - since Delphi 2010, you can call directly
@@ -36875,6 +36885,16 @@ type
     fParser: TJSONCustomParserRegistrations;
     fParsersCount: Integer;
     fParsers: TDynArrayHashed;
+    {$ifndef NOVARIANTS}
+    fVariants: array of record
+      TypeClass: TCustomVariantType;
+      Reader: TDynArrayJSONCustomReader;
+      Writer: TDynArrayJSONCustomWriter;
+    end;
+    function VariantSearch(aClass: TCustomVariantType): integer; 
+    procedure VariantWrite(aClass: TCustomVariantType;
+      aWriter: TTextWriter; const aValue: variant; Escape: TTextWriterKind);
+    {$endif}
     function TryToGetFromRTTI(aDynArrayTypeInfo, aRecordTypeInfo: pointer): integer;
     function Search(aTypeInfo: pointer; var Reg: TJSONCustomParserRegistration;
       AddIfNotExisting: boolean): integer;
@@ -36897,6 +36917,10 @@ type
       aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
     function RegisterFromText(aTypeInfo: pointer;
       const aRTTIDefinition: RawUTF8): TJSONRecordAbstract;
+    {$ifndef NOVARIANTS}
+    procedure RegisterCallbacksVariant(aClass: TCustomVariantType;
+      aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+    {$endif}
     property Parser: TJSONCustomParserRegistrations read fParser;
     property ParsersCount: Integer read fParsersCount;
   end;
@@ -37116,6 +37140,54 @@ begin
   if result<0 then
     result := fParsers.FindHashedForAdding(Reg.RecordTypeName,added);
 end;
+
+{$ifndef NOVARIANTS}
+function TJSONCustomParsers.VariantSearch(aClass: TCustomVariantType): integer;
+begin
+  if self<>nil then
+    for result := 0 to length(fVariants)-1 do
+      if fVariants[result].TypeClass=aClass then
+        exit;
+  result := -1;
+end;
+
+procedure TJSONCustomParsers.VariantWrite(aClass: TCustomVariantType;
+  aWriter: TTextWriter; const aValue: variant; Escape: TTextWriterKind);
+var ndx: integer;
+    temp: string;
+begin
+  ndx := VariantSearch(aClass);
+  if (ndx>=0) and Assigned(fVariants[ndx].Writer) then
+    fVariants[ndx].Writer(aWriter,aValue) else begin
+    temp := aValue; // fallback to JSON string from variant-to-string conversion
+    if Escape=twJSONEscape then
+      aWriter.Add('"');
+    {$ifdef UNICODE}
+    aWriter.AddW(pointer(temp),length(temp),Escape);
+    {$else}
+    aWriter.AddAnsiString(temp,Escape);
+    {$endif}
+    if Escape=twJSONEscape then
+      aWriter.Add('"');
+  end;
+end;
+
+procedure TJSONCustomParsers.RegisterCallbacksVariant(aClass: TCustomVariantType;
+  aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+var ndx: integer;
+begin
+  if self=nil then
+    self := TJSONCustomParsers.Create;
+  ndx := VariantSearch(aClass);
+  if ndx<0 then begin
+    ndx := length(fVariants);
+    SetLength(fVariants,ndx+1);
+    fVariants[ndx].TypeClass := aClass;
+  end;
+  fVariants[ndx].Writer := aWriter;
+  fVariants[ndx].Reader := aReader;
+end;
+{$endif}
 
 procedure TJSONCustomParsers.RegisterCallbacks(aTypeInfo: pointer;
   aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
@@ -43930,9 +44002,9 @@ begin
          if PByteArray(P)^[result]=byte(Elem) then exit;
     2: for result := 0 to max do
          if PWordArray(P)^[result]=word(Elem) then exit;
-    4: for result := 0 to max do
+    4: for result := 0 to max do // integer,single,32bitPointer
          if PIntegerArray(P)^[result]=integer(Elem) then exit;
-    8: for result := 0 to max do // Int64,Currency,Double
+    8: for result := 0 to max do // Int64,Currency,Double,64bitPointer
          if PInt64Array(P)^[result]=Int64(Elem) then exit;
   else // generic binary comparison (fast with our overloaded CompareMem)
     for result := 0 to max do
@@ -46483,6 +46555,23 @@ begin
   GlobalJSONCustomParsers.RegisterCallbacks(aTypeInfo,nil,nil);
 end;
 
+{$ifndef NOVARIANTS}
+class procedure TTextWriter.RegisterCustomJSONSerializerForVariant(
+  aClass: TCustomVariantType;
+  aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+begin // here we register TCustomVariantTypeClass info instead of TypeInfo()
+  GlobalJSONCustomParsers.RegisterCallbacksVariant(aClass,aReader,aWriter);
+end;
+
+class procedure TTextWriter.RegisterCustomJSONSerializerForVariantByType(aVarType: TVarType;
+  aReader: TDynArrayJSONCustomReader; aWriter: TDynArrayJSONCustomWriter);
+var aClass: TCustomVariantType;
+begin
+  if FindCustomVariantType(aVarType,aClass) then
+    RegisterCustomJSONSerializerForVariant(aClass,aReader,aWriter);
+end;
+{$endif NOVARIANTS}
+
 class function TTextWriter.RegisterCustomJSONSerializerFromText(aTypeInfo: pointer;
   const aRTTIDefinition: RawUTF8): TJSONRecordAbstract;
 begin
@@ -46649,10 +46738,11 @@ begin
     if Escape=twJSONEscape then
       Add('"');
   end else
-  if FindCustomVariantType(VType,CustomVariantType) and
-     CustomVariantType.InheritsFrom(TSynInvokeableVariantType) then
-    TSynInvokeableVariantType(CustomVariantType).ToJson(self,Value,Escape) else
-    raise ESynException.CreateUTF8('%.AddVariant(VType=%)',[self,VType]);
+  if FindCustomVariantType(VType,CustomVariantType) then
+    if CustomVariantType.InheritsFrom(TSynInvokeableVariantType) then
+      TSynInvokeableVariantType(CustomVariantType).ToJson(self,Value,Escape) else
+      GlobalJSONCustomParsers.VariantWrite(CustomVariantType,self,Value,Escape) else
+    raise ESynException.CreateUTF8('%.AddVariant VType=%',[self,ord(VType)]);
   end;
 end;
 {$endif NOVARIANTS}
