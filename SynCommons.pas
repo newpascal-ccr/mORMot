@@ -11228,11 +11228,14 @@ type
     /// initialize the thread pool
     // - you could define some callbacks to nest the thread execution, e.g.
     // assigned to TSQLRestServer.BeginCurrentThread/EndCurrentThread
-    // - up to 32 threads could be setup
+    // - up to MaxThreadPoolCount=32 threads could be setup (you may allow a
+    // bigger value, but interrest of this thread pool is to have its process
+    // saturating each CPU core)
     // - if ThreadPoolCount is 0, no thread would be created, and process
     // would take place in the current thread
     constructor Create(ThreadPoolCount: integer; const ThreadName: RawUTF8;
-      OnBeforeExecute: TNotifyThreadEvent=nil; OnAfterExecute: TNotifyThreadEvent=nil); reintroduce; virtual;
+      OnBeforeExecute: TNotifyThreadEvent=nil; OnAfterExecute: TNotifyThreadEvent=nil;
+      MaxThreadPoolCount: integer = 32); reintroduce; virtual;
     /// finalize the thread pool
     destructor Destroy; override;
     /// run a method in parallel, and wait for the execution to finish
@@ -51344,6 +51347,8 @@ end;
 
 procedure TSynMonitorServer.ClientConnect;
 begin
+  if self=nil then
+    exit;
   EnterCriticalSection(fLock);
   try
     inc(fClientsCurrent);
@@ -51357,6 +51362,8 @@ end;
 
 procedure TSynMonitorServer.ClientDisconnect;
 begin
+  if self=nil then
+    exit;
   EnterCriticalSection(fLock);
   try
     if fClientsCurrent>0 then
@@ -51369,6 +51376,8 @@ end;
 
 procedure TSynMonitorServer.ClientDisconnectAll;
 begin
+  if self=nil then
+    exit;
   EnterCriticalSection(fLock);
   try
     fClientsCurrent := 0;
@@ -51380,6 +51389,10 @@ end;
 
 function TSynMonitorServer.GetClientsCurrent: TSynMonitorOneCount;
 begin
+  if self=nil then begin
+    result := 0;
+    exit;
+  end;
   EnterCriticalSection(fLock);
   try
     result := fClientsCurrent;
@@ -51390,6 +51403,10 @@ end;
 
 function TSynMonitorServer.AddCurrentRequestCount(diff: integer): integer;
 begin
+  if self=nil then begin
+    result := 0;
+    exit;
+  end;
   EnterCriticalSection(fLock);
   try
     inc(fCurrentRequestCount,diff);
@@ -59076,8 +59093,10 @@ end;
 
 procedure TSynNameValue.Init(aCaseSensitive: boolean);
 begin
-  List := nil; // release dynamic arrays memory before Fillchar()
+  // release dynamic arrays memory before FillcharFast()
+  List := nil;
   fDynArray.HashInvalidate;
+  // initialize hashed storage
   FillcharFast(self,sizeof(self),0);
   fDynArray.InitSpecific(TypeInfo(TSynNameValueItemDynArray),List,
     djRawUTF8,@Count,not aCaseSensitive);
@@ -60611,14 +60630,15 @@ end;
 { TSynParallelProcess }
 
 constructor TSynParallelProcess.Create(ThreadPoolCount: integer; const ThreadName: RawUTF8;
-  OnBeforeExecute, OnAfterExecute: TNotifyThreadEvent);
+  OnBeforeExecute, OnAfterExecute: TNotifyThreadEvent;
+  MaxThreadPoolCount: integer);
 var i: integer;
 begin
   inherited Create;
   if ThreadPoolCount<0 then
     raise ESynParallelProcess.CreateUTF8('%.Create(%,%)',[Self,ThreadPoolCount,ThreadName]);
-  if ThreadPoolCount>32 then
-    ThreadPoolCount := 32;
+  if ThreadPoolCount>MaxThreadPoolCount then
+    ThreadPoolCount := MaxThreadPoolCount;
   fThreadPoolCount := ThreadPoolCount;
   fThreadName := ThreadName;
   SetLength(fPool,fThreadPoolCount);

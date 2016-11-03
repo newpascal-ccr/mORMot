@@ -12810,7 +12810,7 @@ type
   end;
 
   /// prototype of a class implementing redirection of a given interface
-  // - as returned e.g. by TSQLRest.MultiRedirect methods
+  // - as returned e.g. by TSQLRest.MultiRedirect method
   // - can be used as a main callback, then call Redirect() to manage
   // an internal list of redirections
   // - when you release this instance, will call Rest.Service.CallbackUnregister 
@@ -12821,7 +12821,7 @@ type
     // - will register a callback if aSubscribe is true
     // - will unregister a callback if aSubscribe is false
     // - this method will be implemented as thread-safe
-    // - you can specify some method names, or all redirect methods if []
+    // - you can specify some method names, or all methods redirection if []
     procedure Redirect(const aCallback: IInvokable;
       const aMethodsNames: array of RawUTF8; aSubscribe: boolean=true); overload;
     /// add or remove a class instance callback to the internal redirection list
@@ -12829,7 +12829,7 @@ type
     // - will register a callback if aSubscribe is true
     // - will unregister a callback if aSubscribe is false
     // - this method will be implemented as thread-safe
-    // - you can specify some method names, or all redirect methods if []
+    // - you can specify some method names, or all methods redirection if []
     procedure Redirect(const aCallback: TInterfacedObject;
       const aMethodsNames: array of RawUTF8; aSubscribe: boolean=true); overload;
   end;
@@ -37248,8 +37248,9 @@ begin
 end;
 
 procedure TSQLRestServer.Shutdown(const aStateFileName: TFileName);
+var timeout: Int64;
 {$ifdef WITHLOG}
-var log: ISynLog; // for Enter auto-leave to work with FPC
+   log: ISynLog; // for Enter auto-leave to work with FPC
 {$endif}
 begin
   if fSessions=nil then
@@ -37267,9 +37268,10 @@ begin
   finally
     fSessions.Safe.UnLock;
   end;
+  timeout := GetTickCount64+30000; // never wait forever
   repeat
     SleepHiRes(5);
-  until fStats.AddCurrentRequestCount(0)=0;
+  until (fStats.AddCurrentRequestCount(0)=0) or (GetTickCount64>timeout);
   if aStateFileName<>'' then
     SessionsSaveToFile(aStateFileName);
 end;
@@ -52235,8 +52237,8 @@ begin
       '%.Create(%): interface has no RTTI',[self,fInterfaceName]);
   if fMethodsCount>MAX_METHOD_COUNT then
     raise EInterfaceFactoryException.CreateUTF8(
-      '%.Create(%): interface has too much method, and would break '+
-      'the interface segregation principle',[self,fInterfaceName]);
+      '%.Create(%): interface has too many methods (%), so breaks the '+
+      'Interface Segregation Principle',[self,fInterfaceName,fMethodsCount]);
   fMethodIndexCurrentFrameCallback := -1;
   fMethodIndexCallbackReleased := -1;
   SetLength(fMethods,fMethodsCount);
@@ -53477,6 +53479,7 @@ type
     IMultiCallbackRedirect)
   protected
     fDest: TInterfacedObjectMultiDestDynArray;
+    fDestCount: integer;
     fDests: TDynArray;
     fFakeCallback: TInterfacedObjectMulti;
     procedure Redirect(const aCallback: IInvokable;
@@ -53484,6 +53487,7 @@ type
     procedure Redirect(const aCallback: TInterfacedObject;
       const aMethodsNames: array of RawUTF8; aSubscribe: boolean); overload;
     procedure CallBackUnRegister;
+    function GetInstances(aMethod: integer; var aInstances: TPointerDynArray): integer;
     constructor Create; override;
     destructor Destroy; override;
   end;
@@ -53505,7 +53509,7 @@ constructor TInterfacedObjectMultiList.Create;
 begin
   inherited Create;
   fDests.InitSpecific(TypeInfo(TInterfacedObjectMultiDestDynArray),
-    fDest,djInterface);
+    fDest,djInterface,@fDestCount);
 end;
 
 procedure TInterfacedObjectMultiList.Redirect(const aCallback: IInvokable;
@@ -53522,7 +53526,7 @@ begin
   new.instance := aCallback;
   fSafe.Lock;
   try
-    ndx := fDests.IndexOf(aCallback);
+    ndx := fDests.Find(aCallback);
     if aSubscribe then
       if ndx<0 then
         fDests.Add(new) else
@@ -53549,13 +53553,11 @@ end;
 
 procedure TInterfacedObjectMultiList.CallBackUnRegister;
 begin
-  if fDest<>nil then begin
-    fSafe.Lock;
-    try
-      fDest := nil;
-    finally
-      fSafe.UnLock;
-    end;
+  fSafe.Lock;
+  try
+    fDests.ClearSafe;
+  finally
+    fSafe.UnLock;
   end;
   if fFakeCallback<>nil then begin
     fFakeCallback.CallBackUnRegister;
@@ -53567,6 +53569,28 @@ destructor TInterfacedObjectMultiList.Destroy;
 begin
   CallBackUnRegister;
   inherited Destroy;
+end;
+
+function TInterfacedObjectMultiList.GetInstances(aMethod: integer;
+  var aInstances: TPointerDynArray): integer;
+var i: integer;
+    dest: ^TInterfacedObjectMultiDest;
+begin
+  result := 0;
+  dec(aMethod,RESERVED_VTABLE_SLOTS);
+  if aMethod<0 then
+    exit;
+  SetLength(aInstances,fDestCount);
+  dest := pointer(fDest);
+  for i := 1 to fDestCount do begin
+    if aMethod in dest^.methods then begin
+      aInstances[result] := pointer(dest^.instance);
+      inc(result);
+    end;
+    inc(dest);
+  end;
+  if result<>fDestCount then
+    SetLength(aInstances,result);
 end;
 
 procedure TInterfacedObjectMulti.CallBackUnRegister;
@@ -53601,31 +53625,18 @@ end;
 function TInterfacedObjectMulti.FakeInvoke(const aMethod: TServiceMethod;
   const aParams: RawUTF8; aResult, aErrorMsg: PRawUTF8;
   aClientDrivenID: PCardinal; aServiceCustomAnswer: PServiceCustomAnswer): boolean;
-var i,m,n,d: integer;
+var i: integer;
     exec: TServiceMethodExecute;
     instances: TPointerDynArray;
-    indexes: TIntegerDynArray;
 begin
   result := inherited FakeInvoke(aMethod,aParams,aResult,aErrorMsg,
     aClientDrivenID,aServiceCustomAnswer);
-  m := aMethod.ExecutionMethodIndex-RESERVED_VTABLE_SLOTS;
-  if not result or (fList.fDest=nil) or (m<0) then
+  if not result or (fList.fDestCount=0) then
     exit;
   fList.fSafe.Lock;
   try
-    n := length(fList.fDest);
-    SetLength(indexes,n);
-    SetLength(instances,n);
-    d := 0;
-    for i := 0 to n-1 do
-      if m in fList.fDest[i].methods then begin
-        instances[d] := pointer(fList.fDest[i].instance);
-        indexes[d] := i;
-      end;
-    if instances=nil then
+    if fList.GetInstances(aMethod.ExecutionMethodIndex,instances)=0 then
       exit;
-    if d<>n then
-      SetLength(instances,d);
     exec := TServiceMethodExecute.Create(@aMethod);
     try
       exec.Options := [optIgnoreException]; // use exec.ExecutedInstancesFailed
@@ -53636,7 +53647,7 @@ begin
           try
             fRest.InternalLog('%.FakeInvoke % failed due to % -> unsubscribe',
               [ClassType,aMethod.InterfaceDotMethodName,exec.ExecutedInstancesFailed[i]],sllDebug);
-            InterfaceArrayDelete(fList.fDest,indexes[i]);
+            fList.fDests.FindAndDelete(instances[i]);
           except // ignore any exception when releasing the (unstable?) callback
           end;
     finally
