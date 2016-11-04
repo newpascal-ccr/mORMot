@@ -8567,7 +8567,7 @@ end;
 class function TAESPRNG.GetEntropy(Len: integer): RawByteString;
 var time: Int64;
     ext: TSynExtended;
-    threads: array[0..2] of cardinal;
+    threads: array[0..2] of TThreadID;
     version: RawByteString;
     hmac: THMAC_SHA256;
     entropy: array[0..3] of TSHA256Digest; // 128 bytes
@@ -8661,9 +8661,9 @@ begin
   hmacInit;
   ext := Random;
   hmac.Update(@ext,sizeof(ext));
-  threads[0] := HInstance;
-  threads[1] := GetCurrentThreadId;
-  threads[2] := MainThreadID;
+  threads[0] := TThreadID(HInstance);
+  threads[1] := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
+  threads[2] := {$ifdef Darwin}Cardinal{$endif}(MainThreadID);
   hmac.Update(@threads,sizeof(threads));
   hmac.Done(entropy[1]);
   hmacInit;

@@ -13,9 +13,6 @@
     <i18n>
       <EnableI18N LFM="False"/>
     </i18n>
-    <VersionInfo>
-      <StringTable ProductVersion=""/>
-    </VersionInfo>
     <BuildModes Count="1">
       <Item1 Name="Default" Default="True"/>
     </BuildModes>
@@ -36,7 +33,6 @@
       <Unit0>
         <Filename Value="Project04Server.lpr"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="Project04Server"/>
       </Unit0>
     </Units>
   </ProjectOptions>
@@ -51,6 +47,8 @@
       <OtherUnitFiles Value="..\..;..\..\.."/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
+    <Conditionals Value="if TargetOS='darwin' then
+   CustomOptions := ' -Cg-';"/>
     <Linking>
       <Options>
         <Win32>
@@ -58,9 +56,6 @@
         </Win32>
       </Options>
     </Linking>
-    <Other>
-      <CompilerPath Value="$(CompPath)"/>
-    </Other>
   </CompilerOptions>
   <Debugging>
     <Exceptions Count="3">
@@ -75,4 +70,4 @@
       </Item3>
     </Exceptions>
   </Debugging>
-</CONFIG>
+</CONFIG>

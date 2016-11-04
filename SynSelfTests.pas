@@ -13330,17 +13330,17 @@ end;
 
 function GetThreadID: TThreadID;
 begin // avoid name conflict with TServiceComplexCalculator.GetCurrentThreadID
-  result := GetCurrentThreadId;
+  result := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
 end;
 
 procedure TServiceComplexCalculator.EnsureInExpectedThread;
 begin
   case GlobalInterfaceTestMode of
   itmDirect, itmClient, itmMainThread:
-    if GetThreadID<>MainThreadID then
+    if GetThreadID<>{$ifdef Darwin}Cardinal{$endif}(MainThreadID) then
       raise Exception.Create('Shall be in main thread');
   itmPerInterfaceThread, itmHttp, itmLocked:
-    if GetThreadID=MainThreadID then
+    if GetThreadID={$ifdef Darwin}Cardinal{$endif}(MainThreadID) then
       raise Exception.Create('Shall NOT be in main thread') else
     if ServiceContext.RunningThread=nil then
       raise Exception.Create('Shall have a known RunningThread');
@@ -13500,7 +13500,7 @@ begin
     raise Exception.Create('Unexpected Thread=nil');
   if Thread=nil then
     result := 0 else begin
-    result := Thread.ThreadID;
+    result := {$ifdef Darwin}Cardinal{$endif}(Thread.ThreadID);
     if result<>GetThreadID then
       raise Exception.Create('Unexpected ThreadID');
   end;
@@ -13616,7 +13616,7 @@ var s: RawUTF8;
     Item: TCollTest;
     List,Copy: TCollTestsI;
     j: integer;
-    x,y: PtrUInt; // alf: to help debugging
+    x,y: TThreadID; // alf: to help debugging
 {$endif}
 {$ifndef NOVARIANTS}
     V1,V2,V3: variant;
@@ -13640,9 +13640,9 @@ begin
   end;
   case GlobalInterfaceTestMode of
   itmMainThread:
-    Check(Inst.CC.GetCurrentThreadID=MainThreadID);
+    Check(Inst.CC.GetCurrentThreadID={$ifdef Darwin}Cardinal{$endif}(MainThreadID));
   itmPerInterfaceThread,itmLocked:
-    Check(Inst.CC.GetCurrentThreadID<>MainThreadID);
+    Check(Inst.CC.GetCurrentThreadID<>{$ifdef Darwin}Cardinal{$endif}(MainThreadID));
   end;
   TestCalculator(Inst.I);
   TestCalculator(Inst.CC); // test the fact that CC inherits from ICalculator
@@ -13762,22 +13762,22 @@ begin
   case GlobalInterfaceTestMode of
   itmDirect: begin
     Check(x=y);
-    Check(PtrUInt(Inst.CT.GetCurrentRunningThreadID)=0);
+    Check(Inst.CT.GetCurrentRunningThreadID=TThreadID(0));
     Check(Inst.CT.GetContextServiceInstanceID=0);
   end;
   itmClient, itmPerInterfaceThread: begin
     Check(x=y);
-    Check(PtrUInt(Inst.CT.GetCurrentRunningThreadID)=0);
+    Check(Inst.CT.GetCurrentRunningThreadID=TThreadID(0));
     Check(Inst.CT.GetContextServiceInstanceID<>0);
   end;
   itmLocked, itmMainThread: begin
     Check(x=y);
-    Check(PtrUInt(Inst.CT.GetCurrentRunningThreadID)<>0);
+    Check(Inst.CT.GetCurrentRunningThreadID<>TThreadID(0));
     Check(Inst.CT.GetContextServiceInstanceID<>0);
   end;
   itmHttp: begin
-    Check(Inst.CT.GetCurrentRunningThreadID<>0);
-    Check(PtrUInt(Inst.CT.GetCurrentThreadID)<>MainThreadID);
+    Check(Inst.CT.GetCurrentRunningThreadID<>TThreadID(0));
+    Check(Inst.CT.GetCurrentThreadID<>{$ifdef Darwin}Cardinal{$endif}(MainThreadID));
     Check(Inst.CT.GetContextServiceInstanceID<>0);
   end;
   end;

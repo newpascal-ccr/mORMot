@@ -827,7 +827,9 @@ const
 
 type
   PBoolean = ^Boolean;
-
+  {$ifdef darwin}
+  TThreadID = Cardinal;
+  {$endif}
 {$else FPC}
 
 type
@@ -17017,9 +17019,9 @@ implementation
 {$ifdef FPC}
 uses
   {$ifdef Linux}
-  SynFPCLinux, Unix, dynlibs, Linux,
+  SynFPCLinux, Unix, dynlibs,
   {$ifndef Darwin}
-  SysCall,
+  Linux,SysCall,
   {$endif}
   {$endif}
   SynFPCTypInfo, TypInfo; // small wrapper unit around FPC's TypInfo.pp
@@ -31082,7 +31084,7 @@ end;
 {$endif HASINLINE}
 {$endif FPC}
 
-function xxHash32(P: PAnsiChar; len: integer; seed: cardinal = 0): cardinal;
+function xxHash32(crc: cardinal; P: PAnsiChar; len: integer): cardinal;
 var c1, c2, c3, c4: cardinal;
     PLimit, PEnd: PAnsiChar;
 begin
@@ -31090,7 +31092,7 @@ begin
   if len >= 16 then
     begin
       PLimit := PEnd - 16;
-      c3 := seed;
+      c3 := crc;
       c2 := c3 + PRIME32_2;
       c1 := c2 + PRIME32_1;
       c4 := c3 + cardinal(0-PRIME32_1);
@@ -31103,7 +31105,7 @@ begin
       until not (P <= PLimit);
       result := RolDWord(c1, 1) + RolDWord(c2, 7) + RolDWord(c3, 12) + RolDWord(c4, 18);
     end else
-    result := seed + PRIME32_5;
+    result := crc + PRIME32_5;
   inc(result, len);
   while P <= PEnd - 4 do begin
     inc(result, PCardinal(P)^ * PRIME32_3);
@@ -31517,6 +31519,11 @@ asm
         not     eax
 end;
 
+
+
+
+{$endif PUREPASCAL}
+{$ifdef CPU386}
 procedure GetCPUID(Param: Cardinal; var Registers: TRegisters);
 asm
         push    esi
@@ -31550,7 +31557,6 @@ asm
         pop     edi
         pop     esi
 end;
-
 function crc32csse42(crc: cardinal; buf: PAnsiChar; len: cardinal): cardinal;
 asm // eax=crc, edx=buf, ecx=len
         not     eax
@@ -31615,7 +31621,7 @@ asm // eax=crc, edx=buf, ecx=len
         {$endif}
 @0:     not     eax
 end;
-{$endif PUREPASCAL}
+{$endif CPU386}
 
 function crc32cUTF8ToHex(const str: RawUTF8): RawUTF8;
 begin
@@ -33111,7 +33117,7 @@ var i: integer;
     c: cardinal;
     timenow: Int64;
 begin
-  c := GetTickCount64+Random(maxInt)+GetCurrentThreadID;
+  c := GetTickCount64+Random(maxInt)+{$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadID);
   QueryPerformanceCounter(timenow);
   c := c xor crc32c(c,@timenow,sizeof(timenow));
   for i := 0 to CardinalCount-1 do begin
@@ -51569,7 +51575,7 @@ begin
   FVirtualMemoryTotal.fBytes := MemoryStatus.ullTotalVirtual;
   FVirtualMemoryFree.fBytes := MemoryStatus.ullAvailVirtual;
 {$else}
-{$ifdef LINUX}
+{$ifndef Darwin}
 var si: TSysInfo;
 begin
   {$ifdef FPC}
@@ -59700,7 +59706,7 @@ function IsDebuggerPresent: BOOL; stdcall; external kernel32; // since XP
 
 procedure SetCurrentThreadName(const Format: RawUTF8; const Args: array of const);
 begin
-  SetThreadName(GetCurrentThreadId,Format,Args);
+  SetThreadName({$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId),Format,Args);
 end;
 
 procedure SetThreadName(ThreadID: TThreadID; const Format: RawUTF8;
@@ -59973,7 +59979,7 @@ begin
     result := fPendingProcessFlag;
     if result=flagIdle then begin // we just acquired the thread! congrats!
       fPendingProcessFlag := flagStarted; // atomic set "started" flag
-      fCallerThreadID := ThreadID;
+      fCallerThreadID := {$ifdef Darwin}Cardinal{$endif}(ThreadID);
     end;
   finally
     LeaveCriticalSection(fPendingProcessLock);
@@ -60024,7 +60030,7 @@ var start: Int64;
     ThreadID: TThreadID;
 begin
   result := false;
-  ThreadID := GetCurrentThreadId;
+  ThreadID := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
   if (self=nil) or (ThreadID=fCallerThreadID) then
     // avoid endless loop when waiting in same thread (e.g. UI + OnIdle)
     exit;

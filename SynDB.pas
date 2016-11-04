@@ -6381,7 +6381,7 @@ function TSQLDBConnectionPropertiesThreadSafe.CurrentThreadConnectionIndex: Inte
 var ID: TThreadID;
 begin
   if self<>nil then begin
-    ID := GetCurrentThreadId;
+    ID := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
     result := fLatestConnectionRetrievedInPool;
     if (result>=0) and
        (TSQLDBConnectionThreadSafe(fConnectionPool.List[result]).fThreadID=ID) then
@@ -6438,7 +6438,7 @@ begin
           exit;
       end;
       result := NewConnection;
-      (result as TSQLDBConnectionThreadSafe).fThreadID := GetCurrentThreadId;
+      (result as TSQLDBConnectionThreadSafe).fThreadID := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
       fLatestConnectionRetrievedInPool := fConnectionPool.Add(result)
     finally
       LeaveCriticalSection(fConnectionCS);

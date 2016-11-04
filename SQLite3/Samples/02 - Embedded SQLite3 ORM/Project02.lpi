@@ -9,14 +9,10 @@
       <Title Value="Project02"/>
       <ResourceType Value="res"/>
       <UseXPManifest Value="True"/>
-      <Icon Value="0"/>
     </General>
     <i18n>
       <EnableI18N LFM="False"/>
     </i18n>
-    <VersionInfo>
-      <StringTable ProductVersion=""/>
-    </VersionInfo>
     <BuildModes Count="1">
       <Item1 Name="Default" Default="True"/>
     </BuildModes>
@@ -37,7 +33,6 @@
       <Unit0>
         <Filename Value="Project02.lpr"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="Project02"/>
       </Unit0>
     </Units>
   </ProjectOptions>
@@ -52,6 +47,8 @@
       <OtherUnitFiles Value="..\..;..\..\.."/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
+    <Conditionals Value="if TargetOS='darwin' then
+   CustomOptions := ' -Cg-';"/>
     <Linking>
       <Options>
         <Win32>

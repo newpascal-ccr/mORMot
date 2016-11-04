@@ -126,7 +126,10 @@ begin
 {$endif}
 {$endif}
 {$endif}
-    TTestCryptographicRoutines, TTestECCCryptography,
+    TTestCryptographicRoutines,
+    {$ifndef Darwin}
+    TTestECCCryptography,
+    {$endif}
     TTestCompression
    ]);
 end;

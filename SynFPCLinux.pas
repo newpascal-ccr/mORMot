@@ -165,7 +165,9 @@ end;
 
 procedure DeleteCriticalSection(var cs : TRTLCriticalSection);
 begin
-  if cs.__m_kind<>0 then 
+  {$ifndef DARWIN}
+  if cs.__m_kind<>0 then
+  {$endif}
     DoneCriticalSection(cs);
 end;
 
