@@ -7247,7 +7247,7 @@ begin
   {$ifndef FPC}
   Check(V1='["root",{"name":"Jim"},3.1415]');
   {$endif}
-  V1.Delete(1);
+  V1.Delete(1); //<--- here we get an error with FPC on win64 if optimization = -O1 !??? All ok with -O2
   {$ifndef FPC}
   Check(V1='["root",3.1415]');
   {$endif}
