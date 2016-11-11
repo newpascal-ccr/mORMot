@@ -524,7 +524,12 @@
   {$define NOSQLITE3STATIC}
 {$endif}
 {$ifdef BSD}
-  {$define NOSQLITE3STATIC}
+  {$ifdef Darwin}
+    {$define NOSQLITE3STATIC}
+  {$else}
+    // not yet sure if needed, but it works !
+    {$define NOSQLITE3STATIC}
+  {$endif}
 {$endif}
 
 {$ifdef NOSQLITE3STATIC}

@@ -34561,7 +34561,11 @@ end;
 
 {$ifdef BSD}
 function mprotect(Addr: Pointer; Len: size_t; Prot: Integer): Integer;
+{$ifdef Darwin}
   cdecl external 'libc.dylib' name 'mprotect';
+{$else}
+  cdecl external 'libc.so' name 'mprotect';
+{$endif}
   {$define USEMPROTECT}
 {$endif}
 {$ifdef KYLIX3}
