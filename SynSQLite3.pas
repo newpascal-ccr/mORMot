@@ -5758,7 +5758,7 @@ begin
     fHandle := dlopen(PChar(LibraryName),0);
     if fHandle=nil then
     {$else}
-    fHandle := SafeLoadLibrary({$ifndef FPC}pointer{$endif}(LibraryName));
+    fHandle := LoadLibrary({$ifndef FPC}pointer{$endif}(LibraryName));
     if fHandle=0 then
     {$endif}
   {$endif MSWINDOWS}
