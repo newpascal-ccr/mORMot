@@ -827,7 +827,7 @@ const
 
 type
   PBoolean = ^Boolean;
-  {$ifdef darwin}
+  {$ifdef BSD}
   TThreadID = Cardinal;
   {$endif}
 {$else FPC}
@@ -17020,7 +17020,7 @@ implementation
 uses
   {$ifdef Linux}
   SynFPCLinux, Unix, dynlibs,
-  {$ifndef Darwin}
+  {$ifndef BSD}
   Linux,SysCall,
   {$endif}
   {$endif}
@@ -33117,7 +33117,7 @@ var i: integer;
     c: cardinal;
     timenow: Int64;
 begin
-  c := GetTickCount64+Random(maxInt)+{$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadID);
+  c := GetTickCount64+Random(maxInt)+{$ifdef BSD}Cardinal{$endif}(GetCurrentThreadID);
   QueryPerformanceCounter(timenow);
   c := c xor crc32c(c,@timenow,sizeof(timenow));
   for i := 0 to CardinalCount-1 do begin
@@ -34559,7 +34559,7 @@ begin
 end;
 {$endif MSWINDOWS}
 
-{$ifdef DARWIN}
+{$ifdef BSD}
 function mprotect(Addr: Pointer; Len: size_t; Prot: Integer): Integer;
   cdecl external 'libc.dylib' name 'mprotect';
   {$define USEMPROTECT}
@@ -51575,7 +51575,7 @@ begin
   FVirtualMemoryTotal.fBytes := MemoryStatus.ullTotalVirtual;
   FVirtualMemoryFree.fBytes := MemoryStatus.ullAvailVirtual;
 {$else}
-{$ifndef Darwin}
+{$ifndef BSD}
 var si: TSysInfo;
 begin
   {$ifdef FPC}
@@ -59706,7 +59706,7 @@ function IsDebuggerPresent: BOOL; stdcall; external kernel32; // since XP
 
 procedure SetCurrentThreadName(const Format: RawUTF8; const Args: array of const);
 begin
-  SetThreadName({$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId),Format,Args);
+  SetThreadName({$ifdef BSD}Cardinal{$endif}(GetCurrentThreadId),Format,Args);
 end;
 
 procedure SetThreadName(ThreadID: TThreadID; const Format: RawUTF8;
@@ -59979,7 +59979,7 @@ begin
     result := fPendingProcessFlag;
     if result=flagIdle then begin // we just acquired the thread! congrats!
       fPendingProcessFlag := flagStarted; // atomic set "started" flag
-      fCallerThreadID := {$ifdef Darwin}Cardinal{$endif}(ThreadID);
+      fCallerThreadID := {$ifdef BSD}Cardinal{$endif}(ThreadID);
     end;
   finally
     LeaveCriticalSection(fPendingProcessLock);
@@ -60030,7 +60030,7 @@ var start: Int64;
     ThreadID: TThreadID;
 begin
   result := false;
-  ThreadID := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
+  ThreadID := {$ifdef BSD}Cardinal{$endif}(GetCurrentThreadId);
   if (self=nil) or (ThreadID=fCallerThreadID) then
     // avoid endless loop when waiting in same thread (e.g. UI + OnIdle)
     exit;

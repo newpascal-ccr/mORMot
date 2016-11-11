@@ -61,7 +61,7 @@ interface
 {$ifdef ANDROID}
   {$define LINUX}
 {$endif}
-{$ifdef Darwin}
+{$ifdef BSD}
   {$define LINUX}
 {$endif}
 
@@ -88,7 +88,7 @@ procedure DeleteCriticalSection(var cs : TRTLCriticalSection); inline;
 
 {$ifdef Linux}
 
-{$ifndef DARWIN}
+{$ifndef BSD}
 const
   CLOCK_MONOTONIC = 1;
   CLOCK_MONOTONIC_COARSE = 6; // see http://lwn.net/Articles/347811
@@ -155,7 +155,7 @@ implementation
 
 {$ifdef Linux}
 uses
-  Classes, Unix, BaseUnix, {$ifndef Darwin}linux,{$endif} dynlibs;
+  Classes, Unix, BaseUnix, {$ifndef BSD}linux,{$endif} dynlibs;
 {$endif}
 
 procedure InitializeCriticalSection(var cs : TRTLCriticalSection);
@@ -165,7 +165,7 @@ end;
 
 procedure DeleteCriticalSection(var cs : TRTLCriticalSection);
 begin
-  {$ifndef DARWIN}
+  {$ifndef BSD}
   if cs.__m_kind<>0 then
   {$endif}
     DoneCriticalSection(cs);
@@ -239,7 +239,7 @@ const
   C_MILLION  = Int64(C_THOUSAND * C_THOUSAND);
   C_BILLION  = Int64(C_THOUSAND * C_THOUSAND * C_THOUSAND);
 
-{$ifdef DARWIN}
+{$ifdef BSD}
 // clock_gettime() is not implemented: http://stackoverflow.com/a/5167506/458259
 
 type
@@ -305,7 +305,7 @@ begin
   result := FIsHighResolution;
 end;
 
-{$endif DARWIN}
+{$endif BSD}
 
 function SetFilePointer(hFile: cInt; lDistanceToMove: TOff;
   lpDistanceToMoveHigh: Pointer; dwMoveMethod: cint): TOff;
@@ -362,7 +362,7 @@ begin
   SysUtils.Sleep(ms);
 end;
 
-{$ifndef DARWIN}
+{$ifndef BSD}
 
 procedure GetKernelRevision;
 var uts: UtsName;
@@ -392,6 +392,6 @@ end;
 
 initialization
   GetKernelRevision;
-{$endif DARWIN}
+{$endif BSD}
 {$endif Linux}
 end.

@@ -8662,8 +8662,8 @@ begin
   ext := Random;
   hmac.Update(@ext,sizeof(ext));
   threads[0] := TThreadID(HInstance);
-  threads[1] := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
-  threads[2] := {$ifdef Darwin}Cardinal{$endif}(MainThreadID);
+  threads[1] := {$ifdef BSD}Cardinal{$endif}(GetCurrentThreadId);
+  threads[2] := {$ifdef BSD}Cardinal{$endif}(MainThreadID);
   hmac.Update(@threads,sizeof(threads));
   hmac.Done(entropy[1]);
   hmacInit;

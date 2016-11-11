@@ -13330,17 +13330,17 @@ end;
 
 function GetThreadID: TThreadID;
 begin // avoid name conflict with TServiceComplexCalculator.GetCurrentThreadID
-  result := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
+  result := {$ifdef BSD}Cardinal{$endif}(GetCurrentThreadId);
 end;
 
 procedure TServiceComplexCalculator.EnsureInExpectedThread;
 begin
   case GlobalInterfaceTestMode of
   itmDirect, itmClient, itmMainThread:
-    if GetThreadID<>{$ifdef Darwin}Cardinal{$endif}(MainThreadID) then
+    if GetThreadID<>{$ifdef BSD}Cardinal{$endif}(MainThreadID) then
       raise Exception.Create('Shall be in main thread');
   itmPerInterfaceThread, itmHttp, itmLocked:
-    if GetThreadID={$ifdef Darwin}Cardinal{$endif}(MainThreadID) then
+    if GetThreadID={$ifdef BSD}Cardinal{$endif}(MainThreadID) then
       raise Exception.Create('Shall NOT be in main thread') else
     if ServiceContext.RunningThread=nil then
       raise Exception.Create('Shall have a known RunningThread');
@@ -13500,7 +13500,7 @@ begin
     raise Exception.Create('Unexpected Thread=nil');
   if Thread=nil then
     result := 0 else begin
-    result := {$ifdef Darwin}Cardinal{$endif}(Thread.ThreadID);
+    result := {$ifdef BSD}Cardinal{$endif}(Thread.ThreadID);
     if result<>GetThreadID then
       raise Exception.Create('Unexpected ThreadID');
   end;
@@ -13640,9 +13640,9 @@ begin
   end;
   case GlobalInterfaceTestMode of
   itmMainThread:
-    Check(Inst.CC.GetCurrentThreadID={$ifdef Darwin}Cardinal{$endif}(MainThreadID));
+    Check(Inst.CC.GetCurrentThreadID={$ifdef BSD}Cardinal{$endif}(MainThreadID));
   itmPerInterfaceThread,itmLocked:
-    Check(Inst.CC.GetCurrentThreadID<>{$ifdef Darwin}Cardinal{$endif}(MainThreadID));
+    Check(Inst.CC.GetCurrentThreadID<>{$ifdef BSD}Cardinal{$endif}(MainThreadID));
   end;
   TestCalculator(Inst.I);
   TestCalculator(Inst.CC); // test the fact that CC inherits from ICalculator
@@ -13777,7 +13777,7 @@ begin
   end;
   itmHttp: begin
     Check(Inst.CT.GetCurrentRunningThreadID<>TThreadID(0));
-    Check(Inst.CT.GetCurrentThreadID<>{$ifdef Darwin}Cardinal{$endif}(MainThreadID));
+    Check(Inst.CT.GetCurrentThreadID<>{$ifdef BSD}Cardinal{$endif}(MainThreadID));
     Check(Inst.CT.GetContextServiceInstanceID<>0);
   end;
   end;

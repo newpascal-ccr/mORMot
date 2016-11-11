@@ -3060,7 +3060,7 @@ procedure TSynLog.LockAndGetThreadContext;
 var ID: TThreadID;
 begin
   EnterCriticalSection(GlobalThreadLock);
-  ID := {$ifdef Darwin}Cardinal{$endif}(GetCurrentThreadId);
+  ID := {$ifdef BSD}Cardinal{$endif}(GetCurrentThreadId);
   if ID<>fThreadID then begin
     fThreadID := ID;
     GetThreadContextInternal;

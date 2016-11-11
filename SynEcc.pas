@@ -104,7 +104,7 @@ uses
     {$ifdef KYLIX3}
       {$define ECC_32ASM}     // gcc -g -O1 -c ecc.c
     {$else}
-      {$ifdef Darwin}
+      {$ifdef BSD}
         // just to let it compile ... does not work yet !
         {$define ECC_32ASM}    // gcc -g -O1 -c ecc.c
       {$else}

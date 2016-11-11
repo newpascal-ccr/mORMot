@@ -233,7 +233,8 @@
     {$define LINUX}
   {$endif}
 
-  {$ifdef DARWIN}
+  {$ifdef BSD}
+    // this includes Darwin and BSD family like FreeBSD
     {$define LINUX} // not true, but a POSIX/BSD system
     {$define PUREPASCAL} // e.g. low-level stack layout differs
   {$endif}
@@ -522,7 +523,7 @@
 {$ifdef ANDROID}
   {$define NOSQLITE3STATIC}
 {$endif}
-{$ifdef DARWIN}
+{$ifdef BSD}
   {$define NOSQLITE3STATIC}
 {$endif}
 

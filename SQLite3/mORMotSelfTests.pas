@@ -127,7 +127,7 @@ begin
 {$endif}
 {$endif}
     TTestCryptographicRoutines,
-    {$ifndef Darwin}
+    {$ifndef BSD}
     TTestECCCryptography,
     {$endif}
     TTestCompression
