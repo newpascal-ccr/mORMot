@@ -2059,7 +2059,11 @@ begin
   Check(length(AV)=1001);
   Check(AVP.Count=1001);
   for i := 0 to 1000 do
-    Check(AVP.IndexOf(i)=i);
+  begin
+    // must be the same type !
+    PtrInt(V) := i;
+    Check(AVP.IndexOf(V)=i);
+  end;
   Test := AVP.SaveTo;
   Check(Hash32(Test)={$ifdef CPU64}$31484630{$else}$924462C{$endif});
   // validate TRawUTF8DynArray
