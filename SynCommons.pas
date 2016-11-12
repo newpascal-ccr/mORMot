@@ -30951,9 +30951,8 @@ end;
 function xxHash32(crc: cardinal; P: PAnsiChar; len: integer): cardinal;
 asm
         {$ifdef LINUX} // crc=rdi P=rsi len=rdx
-        mov     r8, rsi
-        mov     rcx, rdx
-        mov     rdx, rdi
+        mov     r8, rdi
+        mov     rcx, rsi
         {$else} // crc=r8 P=rcx len=rdx
         mov     r10, r8
         mov     r8, rcx
