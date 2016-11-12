@@ -2374,7 +2374,7 @@ end;
 function HMAC_CRC32C(key,msg: pointer; keylen,msglen: integer): cardinal;
 var mac: THMAC_CRC32C;
 begin
-  mac.Init(key,sizeof(key));
+  mac.Init(key,keylen);
   mac.Update(msg,msglen);
   result := mac.Done;
 end;
