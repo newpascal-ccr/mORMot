@@ -265,33 +265,22 @@ extern int unixWrite(
       const LOGFUNCLINKNAME = '_log';
     {$endif CPU64}
   {$else}
+    {$ifndef FPC_CROSSCOMPILING}
+      {$linklib gcc.a}
+    {$endif}
     {$ifdef CPU64}
       {$L fpc-linux64\sqlite3-64.o}
-      {$linklib fpc-linux64\gcc.a}
+      {$ifdef FPC_CROSSCOMPILING}
+        {$linklib fpc-linux64\gcc.a}
+      {$endif}
+      const LOGFUNCLINKNAME = 'log';
     {$else}
       {$L fpc-linux32\sqlite3.o}
-      {$linklib fpc-linux32\gcc.a}
+      {$ifdef FPC_CROSSCOMPILING}
+        {$linklib fpc-linux32\gcc.a}
+      {$endif}
       const LOGFUNCLINKNAME = 'log';
     {$endif CPU64}
-
-    function newstat64(path: pchar; buf: PStat): cint; cdecl;
-      public name 'stat64'; export;
-    begin
-      result := fpstat(path,buf^);
-    end;
-
-    function newfstat64(fd: cint; buf: PStat): cint; cdecl;
-      public name 'fstat64'; export;
-    begin
-      result := fpfstat(fd,buf^);
-    end;
-
-    function newlstat64(path: pchar; buf: PStat): cint; cdecl;
-      public name 'lstat64'; export;
-    begin
-      result := fplstat(path,buf^);
-    end;
-
   {$endif MSWINDOWS}
 
 function log(x: double): double; cdecl; public name LOGFUNCLINKNAME; export;

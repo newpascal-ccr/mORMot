@@ -225,8 +225,11 @@
   {$endif}
   {$ifdef LINUX}
     {$ifdef CPUX86}
-      {.$define FPCSQLITE3STATIC} // we supply Linux 32-bit x86 .o
-    {$endif} 
+      {$define FPCSQLITE3STATIC} // we supply Linux 32-bit x86 .o
+    {$endif}
+    {$ifdef CPUX64}
+      {$define FPCSQLITE3STATIC} // we supply Linux 64-bit x86_64 .o
+    {$endif}
   {$endif} 
 
   {$ifdef ANDROID}
