@@ -751,9 +751,7 @@ begin
         if GetClassName(Wnd, tmp, high(tmp)) = 0 then
           tmp[0] := #0;
         WndClass := tmp;
-        if (ToFindClass = WndClass) and FileNameFromWndMatch
-        then
-        begin
+        if (ToFindClass = WndClass) and FileNameFromWndMatch then begin
           { This technique is used by the VCL: post a message then bring the
             window to the top, before the message gets processed }
           PostMessage(Wnd, WM_SYSCOMMAND, SC_RESTORE, 0);

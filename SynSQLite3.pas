@@ -206,7 +206,7 @@ uses
   {$ifdef FPC}
   {$ifdef Linux}
   SynFPCLinux,
-  {$if (defined(BSD)) AND (not defined(Darwin))}
+  {$ifdef BSDNOTDARWIN}
   dl,
   {$else}
   DynLibs,
@@ -2063,7 +2063,7 @@ type
   // ! sqlite3 := TSQLite3LibraryDynamic.Create;
   TSQLite3LibraryDynamic = class(TSQLite3Library)
   protected
-    {$if (defined(BSD)) AND (not defined(Darwin))}
+    {$ifdef BSDNOTDARWIN}
     fHandle: pointer;
     {$else}
     fHandle: THandle;
@@ -5748,13 +5748,13 @@ const
 constructor TSQLite3LibraryDynamic.Create(const LibraryName: TFileName);
 var P: PPointerArray;
     i: integer;
-    aP,fP:pointer;
 begin
   fLibraryName := LibraryName;
   {$ifdef MSWINDOWS}
   fHandle := SafeLoadLibrary(LibraryName);
+  if fHandle=0 then
   {$else}
-    {$if (defined(BSD)) AND (not defined(Darwin))}
+    {$ifdef BSDNOTDARWIN}
     fHandle := dlopen(PChar(LibraryName),0);
     if fHandle=nil then
     {$else}
@@ -5766,17 +5766,17 @@ begin
       [LibraryName,SysErrorMessage(GetLastError)]);
   P := @@initialize;
   for i := 0 to High(SQLITE3_ENTRIES) do
-    {$if (defined(BSD)) AND (not defined(Darwin))}
-    P^[i]:=dlsym(fHandle,PChar('sqlite3_'+SQLITE3_ENTRIES[i]));
+    {$ifdef BSDNOTDARWIN}
+    P^[i] := dlsym(fHandle,PChar('sqlite3_'+SQLITE3_ENTRIES[i]));
     {$else}
     P^[i] := GetProcAddress(fHandle,PChar('sqlite3_'+SQLITE3_ENTRIES[i]));
     {$endif}
   if not Assigned(initialize) or not Assigned(libversion) or
      not Assigned(open) or not Assigned(close) or not Assigned(create_function) or
      not Assigned(prepare_v2) or not Assigned(create_module_v2) then begin
-    {$if (defined(BSD)) AND (not defined(Darwin))}
+    {$ifdef BSDNOTDARWIN}
     dlclose(fHandle);
-    fHandle:=nil;
+    fHandle := nil;
     {$else}
     FreeLibrary(fHandle);
     fHandle := 0;
@@ -5791,7 +5791,7 @@ end;
 
 destructor TSQLite3LibraryDynamic.Destroy;
 begin
-  {$if (defined(BSD)) AND (not defined(Darwin))}
+  {$ifdef BSDNOTDARWIN}
   if fHandle<>nil then
     dlclose(fHandle);
   {$else}

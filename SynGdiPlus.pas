@@ -112,9 +112,10 @@ unit SynGdiPlus;
    - fixed ticket [84dae0a2da] about EMR_BITBLT, thanks to Pierre le Riche
    - implemented clipping - ticket [ba90f15370] - thanks to Pierre le Riche
    - TGDIPlusEnum.DrawText() now handles ETO_GLYPH_INDEX option
-   - fixed ticket [125fc8d280] about random crash in TSynPicture.LoadFromStream 
+   - fixed ticket [125fc8d280] about random crash in TSynPicture.LoadFromStream
    - implemented multi-page support for TTiffImage - thanks sllimr7139 for
      the patch!
+   - FPC / Lazarus compatibility - thanks Alf for the patch
 
 }
 
@@ -123,17 +124,19 @@ unit SynGdiPlus;
 interface
 
 uses
-  {$IFDEF FPC}
-  LCLType, LCLIntf,
-  mymetafile,
-  {$ENDIF}
-  {$IFDEF MSWINDOWS}
-  Windows, CommCtrl, Messages,
-  {$ENDIF}
-  {$ifdef FPC}
-  LResources,
+  {$ifdef MSWINDOWS}
+  Windows, 
+  CommCtrl, 
+  Messages,
   {$endif}
-  Classes, SysUtils,
+  {$ifdef FPC}
+  LCLType, 
+  LCLIntf,
+  LResources,
+  SynFPCMetaFile,
+  {$endif}
+  Classes, 
+  SysUtils,
   {$ifdef ISDELPHIXE2}
   VCL.Graphics,
   {$else}
@@ -425,7 +428,6 @@ type
     procedure LoadFromBuffer(Buffer: pointer; Len: integer);
     procedure SaveToStream(Stream: TStream); override;
     procedure SaveInternalToStream(Stream: TStream);
-
     procedure LoadFromResourceName(Instance: THandle; const ResName: string);{$ifdef FPC} override;{$endif}
     {$ifdef FPC}
     procedure LoadFromClipboardFormat(FormatID: TClipboardFormat); override;
@@ -728,7 +730,7 @@ var
 
 /// will set global Gdip instance from a TGDIPlusFull, if available
 // - this GDI+ 1.1 version (i.e. gdiplus11.dll) allows proper TMetaFile
-// antialiasing, as requested by LoadFrom and DrawEmfGdip functions 
+// antialiasing, as requested by LoadFrom and DrawEmfGdip functions
 procedure ExpectGDIPlusFull(ForceInternalAntiAliased: boolean=true;
   ForceInternalAntiAliasedFontFallBack: boolean=true);
 
@@ -1187,7 +1189,7 @@ end;
 procedure TSynPicture.Clear;
 begin
   {$ifdef FPC}
-  inherited;
+  inherited Clear;
   {$endif}
   fHasContent := false;
   fAssignedFromBitmap := false;
@@ -1568,7 +1570,7 @@ end;
 {$ifdef FPC}
 function TSynPicture.GetTransparent: Boolean;
 begin // not implemented
-  result:=false;
+  result := false;
 end;
 
 procedure TSynPicture.SetTransparent(Value: Boolean);
@@ -2037,47 +2039,6 @@ end;
 
  { TGDIPlusEnum }
 
-{$ifdef FPC}
-const
-  EMR_HEADER = 1;
-  EMR_POLYBEZIER = 2;
-  EMR_POLYGON = 3;
-  EMR_POLYLINE = 4;
-  EMR_SETWINDOWEXTEX = 9;
-  EMR_SETWINDOWORGEX = 10;
-  EMR_SETVIEWPORTEXTEX = 11;
-  EMR_SETVIEWPORTORGEX = 12;
-  EMR_SETBKMODE = 18;
-  EMR_SETTEXTALIGN = 22;
-  EMR_SETTEXTCOLOR = 24;
-  EMR_SETBKCOLOR = 25;
-  EMR_OFFSETCLIPRGN = 26;
-  EMR_MOVETOEX = 27;
-  EMR_EXCLUDECLIPRECT = 29;
-  EMR_INTERSECTCLIPRECT = 30;
-  EMR_SAVEDC = 33;
-  EMR_RESTOREDC = 34;
-  EMR_SETWORLDTRANSFORM = 35;
-  EMR_SELECTOBJECT = 37;
-  EMR_CREATEPEN = 38;
-  EMR_CREATEBRUSHINDIRECT = 39;
-  EMR_DELETEOBJECT = 40;
-  EMR_ELLIPSE = 42;
-  EMR_RECTANGLE = 43;
-  EMR_ROUNDRECT = 44;
-  EMR_LINETO = 54;
-  EMR_SELECTCLIPPATH = 67;
-  EMR_EXTSELECTCLIPRGN = 75;
-  EMR_BITBLT = 76;
-  EMR_STRETCHBLT = 77;
-  EMR_STRETCHDIBITS = 81;
-  EMR_EXTCREATEFONTINDIRECTW = 82;
-  EMR_EXTTEXTOUTW = 84;
-  EMR_POLYBEZIER16 = 85;
-  EMR_POLYGON16 = 86;
-  EMR_POLYLINE16 = 87;
-{$endif}
-
 type
   {$ifdef FPC}
   TEMRExtTextOut = TEMREXTTEXTOUTA;
@@ -2176,7 +2137,7 @@ begin
   end;
 end;
 
-procedure NormalizeRect(var Rect: {$ifdef FPC}TRECTL{$else}TRect{$endif});
+procedure NormalizeRect(var Rect: {$ifdef FPC}TRectL{$else}TRect{$endif});
 var tmp: integer;
 begin // GDI+ can't draw twisted rects -> normalize such values
   if Rect.Right<Rect.Left then begin

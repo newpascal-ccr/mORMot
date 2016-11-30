@@ -240,6 +240,9 @@
     // this includes Darwin and BSD family like FreeBSD
     {$define LINUX} // not true, but a POSIX/BSD system
     {$define PUREPASCAL} // e.g. low-level stack layout differs
+    {$ifndef DARWIN}
+      {$define BSDNOTDARWIN}
+    {$endif}
   {$endif}
 
   {$ifdef CPU64}

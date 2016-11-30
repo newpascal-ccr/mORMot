@@ -293,7 +293,6 @@ end;
   // Delphi has a more complex linking strategy, since $linklib doesn't exist :(
   {$ifdef MSWINDOWS}
     {$ifdef CPU64}
-      //{$L sqlite3.o} // compiled with bcc64 via c64.bat
       {$L fpc-win64\sqlite3-64.o} // compiled with gcc for FPC ... try
     {$else}
       {$ifdef INCLUDE_FTS3}
@@ -758,6 +757,13 @@ end;
 // http://wiki.freepascal.org/Code_Conversion_Guide#Nested_procedures.2Ffunctions_as_procedural_variables
 {$ifndef PUREPASCAL}
 procedure Xor64(PI, P: PPtrIntArray; Count: cardinal); // fast xor
+{$ifdef PUREPASCAL}
+var i: cardinal;
+begin
+  for i := 0 to (Count div sizeof(PtrInt))-1 do
+    P^[i] := P^[i] xor PI^[i]; // this will compile fine for 64 bit CPU
+end;
+{$else}
 asm // eax=PI edx=P ecx=bytes count
   push ebx
   push esi
@@ -787,12 +793,10 @@ begin
     Len := SQLEncryptTableSize-Index;
     if cardinal(Len)>cardinal(Count) then
       Len := Count;
-    {$ifndef PUREPASCAL}
     Xor64(@SQLEncryptTable^[Index],pointer(p),Len); // xor 8 bytes per loop
     L := Len and (-8); // -8=$FFFFFFF8
     inc(p,L);
     inc(Index,L);
-    {$endif}
     for i := 1 to (Len and 7) do begin // xor 0..7 remaining bytes
       p^ := p^ xor SQLEncryptTable^[Index];
       inc(p); inc(Index);
@@ -1029,15 +1033,10 @@ begin
         inc(buf,nCopy);
         dec(buflen,nCopy);
         inc(off,nCopy);
-      end
-      {$ifdef MSWINDOWS}
-      else
+      end else
       raise ESynException.CreateUTF8(
         'sqlite3_key(%) expects PRAGMA mmap_size=0 write(off=% mmapSize=% buflen=%)',
         [F.zPath,off,Int64(F.mmapSize),bufLen]);
-      {$else}
-      ;
-      {$endif}
   //SynSQLite3Log.Add.Log(sllCustom2,'WinWrite % off=% len=%',[F.h,off,buflen]);
   offset.Hi := offset.Hi and $7fffffff; // offset must be positive (u64)
   if FileSeek64(F.h,off,soFromBeginning)=-1 then begin
@@ -1121,15 +1120,10 @@ begin
         inc(buf,nCopy);
         dec(buflen,nCopy);
         inc(off,nCopy);
-      end
-      {$ifdef MSWINDOWS}
-      else
+      end else
       raise ESynException.CreateUTF8(
         'sqlite3_key(%) expects PRAGMA mmap_size=0 read(off=% mmapSize=% buflen=%)',
         [F.zPath,off,Int64(F.mmapSize),bufLen]);
-      {$else}
-      ;
-      {$endif}
   //SynSQLite3Log.Add.Log(sllCustom2,'WinRead % off=% len=%',[F.h,off,buflen]);
   offset.Hi := offset.Hi and $7fffffff; // offset must be positive (u64)
   if FileSeek64(F.h,off,soFromBeginning)=-1 then begin

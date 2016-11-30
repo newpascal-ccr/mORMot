@@ -113,7 +113,7 @@ type
 
 procedure TTestSynopsemORMotFramework.SynopseLibraries;
 begin
-  //exit;
+  // exit;
   AddCase([TTestLowLevelCommon,
     TTestLowLevelTypes,
 {$ifdef MSWINDOWS}
@@ -127,7 +127,7 @@ begin
 {$endif}
 {$endif}
     TTestCryptographicRoutines,
-    {$ifndef BSD}
+    {$ifndef BSD} // todo: proper ECC support for BSD/Darwin
     TTestECCCryptography,
     {$endif}
     TTestCompression

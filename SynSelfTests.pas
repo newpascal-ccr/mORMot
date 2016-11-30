@@ -2058,9 +2058,8 @@ begin
   end;
   Check(length(AV)=1001);
   Check(AVP.Count=1001);
-  for i := 0 to 1000 do
-  begin
-    // must be the same type !
+  for i := 0 to 1000 do begin
+    // untyped const must be the same exact type !
     PtrInt(V) := i;
     Check(AVP.IndexOf(V)=i);
   end;
