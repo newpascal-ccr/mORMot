@@ -1267,6 +1267,7 @@ uses
 {$endif LVCL}
   SysUtils,
 {$ifdef SSPIAUTH}
+  SynSSPI,
   SynSSPIAuth,
 {$endif}
   SynCommons,
@@ -12084,8 +12085,8 @@ type
     // method instead of calling this constructor directly
     constructor Create(aRestServer: TSQLRestServer; aInterface: PTypeInfo;
       aInstanceCreation: TServiceInstanceImplementation;
-      aImplementationClass: TInterfacedClass; const aContractExpected: RawUTF8='';
-      aTimeOutSec: cardinal=30*60; aSharedInstance: TInterfacedObject=nil); reintroduce;
+      aImplementationClass: TInterfacedClass; const aContractExpected: RawUTF8;
+      aTimeOutSec: cardinal; aSharedInstance: TInterfacedObject); reintroduce;
     /// release all used memory
     // - e.g. any internal TServiceFactoryServerInstance instances (any shared
     // instance, and all still living instances in sicClientDrive mode)
@@ -12472,7 +12473,7 @@ type
     function GetService(const aURI: RawUTF8): TServiceFactory;
   public
     /// initialize the list
-    constructor Create(aRest: TSQLRest);
+    constructor Create(aRest: TSQLRest); virtual;
     /// release all registered services
     destructor Destroy; override;
     /// release all services of a TSQLRest instance before shutdown
@@ -12641,6 +12642,7 @@ type
     fOnCallbackReleasedOnServerSide: TOnCallbackReleased;
     fCallbackOptions: TServiceCallbackOptions;
     fRecordVersionCallback: array of IServiceRecordVersionCallbackDynArray;
+    fSessionTimeout: cardinal;
     /// make some garbage collection when session is finished
     procedure OnCloseSession(aSessionID: cardinal); virtual;
     procedure FakeCallbackAdd(aFakeInstance: TObject);
@@ -12673,6 +12675,8 @@ type
       const aInterfaces: array of PTypeInfo;
       aInstanceCreation: TServiceInstanceImplementation;
       aSharedImplementation: TInterfacedObject; const aContractExpected: RawUTF8): TServiceFactoryServer;
+    /// initialize the list
+    constructor Create(aRest: TSQLRest); override;
     /// finalize the service container
     destructor Destroy; override;
     /// register a callback interface which will be called each time a write
@@ -12711,6 +12715,10 @@ type
     // - is set to FALSE by default, for security reasons: only "_contract_"
     // pseudo method is available - see TServiceContainer.ContractExpected
     property PublishSignature: boolean read fPublishSignature write fPublishSignature;
+    /// the default TServiceFactoryServer.TimeoutSec value
+    // - default is 30 minutes
+    // - you can customize each service using its corresponding TimeoutSec property
+    property SessionTimeout: cardinal read fSessionTimeout write fSessionTimeout;
     /// this event will be launched when a callback interface is notified as
     // relased on the Client side
     // - as an alternative, you may define the following method on the
@@ -52070,10 +52078,11 @@ begin
       RaiseError('method returned value, but ResArray=''''',[]);
 end;
 begin
-  // WELCOME ABOARD: you just landed in TInterfacedObjectFake.FakeCall() !
-  // if your debugger reached here, you are executing a "fake" interface
-  // forged to call a remote SOA server or mock/stub an interface
-
+  (*
+     WELCOME ABOARD: you just landed in TInterfacedObjectFake.FakeCall() !
+     if your debugger reached here, you are executing a "fake" interface
+     forged to call a remote SOA server or mock/stub an interface
+  *)
   self := SelfFromInterface;
   {$ifdef CPUAARCH64}
   // alf: on aarch64, the self is sometimes only available in x1, when we have a result pointer !
@@ -55512,7 +55521,8 @@ begin
   // register this implementation class
   for j := 0 to high(aInterfaces) do begin
     F := TServiceFactoryServer.Create(Rest as TSQLRestServer,aInterfaces[j],
-      aInstanceCreation,aImplementationClass,aContractExpected,1800,aSharedImplementation);
+      aInstanceCreation,aImplementationClass,aContractExpected,
+      fSessionTimeout,aSharedImplementation);
     if result=nil then begin
       result := F; // returns the first registered interface
       if (aInstanceCreation=sicShared) and (aSharedImplementation=nil) then
@@ -55531,6 +55541,12 @@ begin
     with TServiceFactoryServer(Index(i)) do
     if InstanceCreation=sicPerSession then
       InternalInstanceRetrieve(Inst,SERVICE_METHODINDEX_FREEINSTANCE);
+end;
+
+constructor TServiceContainerServer.Create(aRest: TSQLRest);
+begin
+  inherited Create(aRest);
+  fSessionTimeout := 30*60; // 30 minutes by default
 end;
 
 destructor TServiceContainerServer.Destroy;
@@ -56114,8 +56130,8 @@ begin
   end;
 end;
 
-constructor TServiceFactoryServer.Create(aRestServer: TSQLRestServer; aInterface: PTypeInfo;
-  aInstanceCreation: TServiceInstanceImplementation;
+constructor TServiceFactoryServer.Create(aRestServer: TSQLRestServer;
+  aInterface: PTypeInfo; aInstanceCreation: TServiceInstanceImplementation;
   aImplementationClass: TInterfacedClass; const aContractExpected: RawUTF8;
   aTimeOutSec: cardinal; aSharedInstance: TInterfacedObject);
 begin
@@ -56480,9 +56496,9 @@ var Inst: TServiceFactoryServerInstance;
       result := fInterface.fMethods[Ctxt.ServiceMethodIndex].InterfaceDotMethodName else
       result := fInterface.fInterfaceName;
   end;
-  procedure Error(const Msg: RawUTF8; Status: integer=HTTP_BADREQUEST);
+  procedure Error(const Msg: RawUTF8; Status: integer);
   begin
-    Ctxt.Error('(%) % for %',[ToText(InstanceCreation)^,Msg,GetFullMethodName],Status);
+    Ctxt.Error('% % for %',[ToText(InstanceCreation)^,Msg,GetFullMethodName],Status);
   end;
   function StatsCreate: TSynMonitorInputOutput;
   begin
@@ -56556,8 +56572,8 @@ begin
     end;
   end;
   if Inst.Instance=nil then begin
-    Error('instance not found or deprecated',HTTP_FORBIDDEN);
-    exit; // HTTP_FORBIDDEN will let TSQLRestClientURI.URI try to relog
+    Error('instance not found or deprecated',HTTP_UNAUTHORIZED);
+    exit;
   end;
   Ctxt.ServiceInstanceID := Inst.InstanceID;
   // 2. call method implementation
@@ -58817,7 +58833,7 @@ function TServiceFactoryClient.InternalInvoke(const aMethod: RawUTF8;
   const aParams: RawUTF8; aResult: PRawUTF8; aErrorMsg: PRawUTF8;
   aClientDrivenID: PCardinal; aServiceCustomAnswer: PServiceCustomAnswer;
   aClient: TSQLRestClientURI): boolean;
-var uri,sent,resp,head,clientDrivenID: RawUTF8;
+var baseuri,uri,sent,resp,head,clientDrivenID: RawUTF8;
     Values: TPUtf8CharDynArray;
     status,m: integer;
     {$ifdef WITHLOG}
@@ -58844,16 +58860,27 @@ begin
   {$endif}
   // compute URI according to current routing scheme
   if fForcedURI<>'' then
-    uri := fForcedURI else
+    baseuri := fForcedURI else
     if fRest.Services.ExpectMangledURI then
-      uri := aClient.Model.Root+'/'+fInterfaceMangledURI else
-      uri := aClient.Model.Root+'/'+fInterfaceURI;
+      baseuri := aClient.Model.Root+'/'+fInterfaceMangledURI else
+      baseuri := aClient.Model.Root+'/'+fInterfaceURI;
+  uri := baseuri;
   fRest.ServicesRouting.ClientSideInvoke(uri,aMethod,aParams,clientDrivenID,sent);
   if ParamsAsJSONObject and (clientDrivenID='') then
     if m>=0 then  // ParamsAsJSONObject won't apply to _signature_ e.g.
       sent := fInterface.Methods[m].ArgsArrayToObject(Pointer(sent),true);
   // call remote server
   status := aClient.URI(uri,'POST',@resp,@head,@sent).Lo;
+  if (status=HTTP_UNAUTHORIZED) and (clientDrivenID<>'') and
+     (fInstanceCreation=sicClientDriven) and (aClientDrivenID<>nil) then begin
+    {$ifdef WITHLOG}
+    log.Log(sllClient,'% -> try to recreate ClientDrivenID',[resp],self);
+    {$endif}
+    aClientDrivenID^ := 0;
+    uri := baseuri;
+    fRest.ServicesRouting.ClientSideInvoke(uri,aMethod,aParams,'',sent);
+    status := aClient.URI(uri,'POST',@resp,@head,@sent).Lo;
+  end;
   // decode result
   if aServiceCustomAnswer=nil then begin
     // handle errors at REST level
