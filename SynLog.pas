@@ -480,7 +480,9 @@ type
     {$endif}
     procedure SetDestinationPath(const value: TFileName);
     procedure SetLevel(aLevel: TSynLogInfos);
+    procedure SynLogFileListEcho(const aEvent: TOnTextWriterEcho; aEventAdd: boolean);
     procedure SetEchoToConsole(aEnabled: TSynLogInfos);
+    procedure SetEchoCustom(const aEvent: TOnTextWriterEcho);
     function GetSynLogClassName: string;
   public
     /// intialize for a TSynLog class family
@@ -495,9 +497,10 @@ type
     // - creates the TSynLog if not already existing for this current thread
     function SynLog: TSynLog;
     /// register one object and one echo callback for remote logging
-    // - aClient is typically a mORMot's TSQLHttpClient
+    // - aClient is typically a mORMot's TSQLHttpClient or a TSynLogCallbacks
+    // instance as defined in this unit
     // - if aClientOwnedByFamily is TRUE, its life time will be manage by this
-    // TSynLogFamily: it will staty alive until this TSynLogFamily is destroyed,
+    // TSynLogFamily: it will stay alive until this TSynLogFamily is destroyed,
     // or the EchoRemoteStop() method called
     // - aClientEvent should be able to send the log row to the remote server
     procedure EchoRemoteStart(aClient: TObject; const aClientEvent: TOnTextWriterEcho;
@@ -546,7 +549,7 @@ type
     // - could be used with a third-party logging system
     // - EchoToConsole or EchoCustom can be activated separately
     // - you may even disable the integrated file output, via NoFile := true
-    property EchoCustom: TOnTextWriterEcho read fEchoCustom write fEchoCustom;
+    property EchoCustom: TOnTextWriterEcho read fEchoCustom write SetEchoCustom;
     /// the associated TSynLog class
     property SynLogClass: TSynLogClass read fSynLogClass;
   published
@@ -1332,6 +1335,14 @@ type
     lfNone,lfAll,lfErrors,lfExceptions,lfProfile,lfDatabase,lfClientServer,
     lfDebug,lfCustom,lfDDD);
 
+  /// syslog message facilities as defined by RFC 3164
+  TSyslogFacility = (sfKern, sfUser, sfMail, sfDaemon, sfAuth, sfSyslog, sfLpr,
+    sfNews, sfUucp, sfClock, sfAuthpriv, sfFtp, sfNtp, sfAudit, sfAlert, sfCron,
+    sfLocal0, sfLocal1, sfLocal2, sfLocal3, sfLocal4, sfLocal5, sfLocal6, sfLocal7);
+
+  /// syslog message severities as defined by RFC 5424
+  TSyslogSeverity = (ssEmerg, ssAlert, ssCrit, ssErr, ssWarn, ssNotice, ssInfo, ssDebug);
+
 const
   /// up to 16 TSynLogFamily, i.e. TSynLog children classes can be defined
   MAX_SYNLOGFAMILY = 15;
@@ -1375,7 +1386,6 @@ const
      $000000,$000000,$000000,
      $000000,$000000,$000000,$000000,$000000,$FFFFFF,$000000,$000000));
 
-
   /// how TLogFilter map TSynLogInfo events
   LOG_FILTER: array[TSynLogFilter] of TSynLogInfos = (
     [], [succ(sllNone)..high(TSynLogInfo)],
@@ -1391,6 +1401,24 @@ const
   /// may be used to log as Debug or Error event, depending on an Error: boolean
   LOG_DEBUGERROR: array[boolean] of TSynLogInfo = (sllDebug, sllError);
 
+  /// used to convert a TSynLog event level into a syslog message severity
+  LOG_TO_SYSLOG: array[TSynLogInfo] of TSyslogSeverity = (
+   ssDebug, ssInfo, ssDebug, ssDebug, ssNotice, ssWarn,
+  // sllNone, sllInfo, sllDebug, sllTrace, sllWarning, sllError,
+   ssDebug, ssDebug,
+  // sllEnter, sllLeave,
+  ssWarn, ssErr, ssErr, ssDebug, ssDebug,
+  // sllLastError, sllException, sllExceptionOS, sllMemory, sllStackTrace,
+  ssNotice, ssDebug, ssDebug, ssDebug, ssDebug, ssDebug, ssDebug, ssDebug,
+  // sllFail, sllSQL, sllCache, sllResult, sllDB, sllHTTP, sllClient, sllServer,
+  ssDebug, ssDebug, ssDebug, 
+  // sllServiceCall, sllServiceReturn, sllUserAuth,
+  ssDebug, ssDebug, ssDebug, ssDebug, ssNotice,
+  // sllCustom1, sllCustom2, sllCustom3, sllCustom4, sllNewRun,
+  ssWarn, ssInfo, ssDebug);
+  // sllDDDError, sllDDDInfo, sllMonitoring);
+
+  
 /// returns the trimmed text value of a logging level
 // - i.e. 'Warning' for sllWarning
 function ToText(event: TSynLogInfo): RawUTF8; overload;
@@ -1463,6 +1491,14 @@ function EventArchiveDelete(const aOldLogFileName, aDestinationPath: TFileName):
 // - use UnSynLZ.dpr tool to uncompress it into .log textual file
 // - SynLZ is much faster than zip for compression content, but proprietary
 function EventArchiveSynLZ(const aOldLogFileName, aDestinationPath: TFileName): boolean;
+
+/// append some information to a syslog message memory buffer
+// - following https://tools.ietf.org/html/rfc5424 specifications
+// - ready to be sent via UDP to a syslog remote server
+// - returns the number of bytes written to destbuffer
+function SyslogMessage(facility: TSyslogFacility; severity: TSyslogSeverity;
+  const msg, procid, msgid: RawUTF8; destbuffer: PUTF8Char; destsize: integer;
+  trimmsgfromlog: boolean): integer;
 
 
 implementation
@@ -2194,6 +2230,88 @@ begin
   if GetLastException(info) then
     result := ToText(info) else
     result := '';
+end;
+
+function SyslogMessage(facility: TSyslogFacility; severity: TSyslogSeverity;
+  const msg, procid, msgid: RawUTF8; destbuffer: PUTF8Char; destsize: integer;
+  trimmsgfromlog: boolean): integer;
+  procedure PrintUSAscii(const text: RawUTF8);
+    function IsPrintUSAscii(const text: RawUTF8): boolean;
+    var i: integer;
+    begin
+      result := false;
+      if text='' then
+        exit;
+      for i := 1 to length(text) do
+        if not (ord(text[i]) in [33..126]) then
+          exit;
+      result := true;
+    end;
+  begin
+    destbuffer^ := ' ';
+    inc(destbuffer);
+    if IsPrintUSAscii(text) then
+      destbuffer := AppendRawUTF8ToBuffer(destbuffer,text) else begin
+      destbuffer^ := '-'; // NILVALUE
+      inc(destbuffer);
+    end;
+  end;
+var tmp: array[0..15] of AnsiChar;
+    P: PAnsiChar;
+    start: PUTF8Char;
+    D: TDateTime;
+    len: integer;
+begin
+  result := 0;
+  if destsize<127 then
+    exit;
+  start := destbuffer;
+  destbuffer^ := '<';
+  inc(destbuffer);
+  P := StrUInt32(@tmp[15],ord(severity)+ord(facility) shl 3);
+  len := @tmp[15]-P;
+  MoveFast(P^,destbuffer^,len);
+  inc(destbuffer,len);
+  PInteger(destbuffer)^ := ord('>')+ord('1')shl 8+ord(' ')shl 16; // VERSION=1
+  inc(destbuffer,3);
+  D := NowUTC;
+  DateToIso8601PChar(D,destbuffer,true);
+  TimeToIso8601PChar(D,destbuffer+10,True,'T',true);
+  destbuffer[23] := 'Z';
+  inc(destbuffer,24);
+  if length(ExeVersion.Host)+length(ExeVersion.ProgramName)+length(procid)+length(msgid)+
+    (destbuffer-start)+15>destsize then
+    exit; // avoid buffer overflow
+  PrintUSAscii(ExeVersion.Host); // HOST
+  PrintUSAscii(ExeVersion.ProgramName); // APP-NAME
+  PrintUSAscii(procid); // PROCID
+  PrintUSAscii(msgid); // MSGID
+  PrintUSAscii(''); // no STRUCTURED-DATA
+  destbuffer^ := ' ';
+  inc(destbuffer);
+  len := length(msg);
+  P := pointer(msg);
+  if trimmsgfromlog and (len>27) then 
+    if (P[0]='2') and (P[8]=' ') then begin
+      inc(P,27); // trim e.g. '20160607 06442255  ! trace '
+      dec(len,27);
+    end else
+    if HexToBin(P,nil,8) then begin
+      inc(P,25); // trim e.g. '00000000089E5A13  " info '
+      dec(len,25);
+    end;
+  while (len>0) and (P^<=' ') do begin
+    inc(P);
+    dec(len);
+  end;
+  len := Utf8TruncatedLength(P,len,destsize-(destbuffer-start)-3);
+  if not IsAnsiCompatible(P,len) then begin
+    PInteger(destbuffer)^ := $bfbbef; // UTF-8 BOM
+    inc(destbuffer,3);
+  end;
+  result := destbuffer-start;
+  MoveFast(P^,destbuffer^,len);
+  inc(result,len);
 end;
 
 {$ifndef NOVARIANTS}
@@ -3008,26 +3126,44 @@ begin
   {$endif}
 end;
 
-procedure TSynLogFamily.EchoRemoteStart(aClient: TObject;
-  const aClientEvent: TOnTextWriterEcho; aClientOwnedByFamily: boolean);
+procedure TSynLogFamily.SynLogFileListEcho(const aEvent: TOnTextWriterEcho; aEventAdd: boolean);
 var i: integer;
 begin
-  EchoRemoteStop;
-  fEchoRemoteClient := aClient;
-  fEchoRemoteEvent := aClientEvent;
-  fEchoRemoteClientOwned := aClientOwnedByFamily;
+  if (self=nil) or (SynLogFileList=nil) or not Assigned(aEvent) then
+    exit;
   SynLogFileList.Safe.Lock;
   try
     for i := 0 to SynLogFileList.Count-1 do
       if TSynLog(SynLogFileList.List[i]).fFamily=self then
-        TSynLog(SynLogFileList.List[i]).fWriter.EchoAdd(fEchoRemoteEvent);
+        with TSynLog(SynLogFileList.List[i]).fWriter do
+          if aEventAdd then
+            EchoAdd(aEvent) else
+            EchoRemove(aEvent);
   finally
     SynLogFileList.Safe.UnLock;
   end;
 end;
 
+procedure TSynLogFamily.SetEchoCustom(const aEvent: TOnTextWriterEcho);
+begin
+  if self=nil then
+    exit;
+  SynLogFileListEcho(fEchoCustom,false); // unsubscribe any previous
+  fEchoCustom := aEvent;
+  SynLogFileListEcho(aEvent,true); // subscribe new
+end;
+
+procedure TSynLogFamily.EchoRemoteStart(aClient: TObject;
+  const aClientEvent: TOnTextWriterEcho; aClientOwnedByFamily: boolean);
+begin
+  EchoRemoteStop;
+  fEchoRemoteClient := aClient;
+  fEchoRemoteEvent := aClientEvent;
+  fEchoRemoteClientOwned := aClientOwnedByFamily;
+  SynLogFileListEcho(fEchoRemoteEvent,true); // subscribe
+end;
+
 procedure TSynLogFamily.EchoRemoteStop;
-var i: integer;
 begin
   if fEchoRemoteClient=nil then
     exit;
@@ -3038,22 +3174,12 @@ begin
           FormatUTF8('%00%    Remote Client % Disconnected',
             [NowToString(false),LOG_LEVEL_TEXT[sllClient],self]));
       finally
-        FreeAndNil(fEchoRemoteClient);
+        fEchoRemoteClient.Free;
       end;
     except
       on Exception do ;
-    end else
-    fEchoRemoteClient := nil;
-  if SynLogFileList<>nil then begin
-    SynLogFileList.Safe.Lock;
-    try
-      for i := 0 to SynLogFileList.Count-1 do
-        if TSynLog(SynLogFileList.List[i]).fFamily=self then
-          TSynLog(SynLogFileList.List[i]).fWriter.EchoRemove(fEchoRemoteEvent);
-    finally
-      SynLogFileList.Safe.UnLock;
     end;
-  end;
+  SynLogFileListEcho(fEchoRemoteEvent,false); // unsubscribe
   fEchoRemoteEvent := nil;
 end;
 
@@ -3074,7 +3200,7 @@ begin
       if SynLogFileList.Count=1 then begin
         log := SynLogFileList.List[0];
         if log.fFamily<>self then
-          continue; 
+          continue;
         EnterCriticalSection(GlobalThreadLock);
         try
           log.Writer.FlushToStream;
@@ -3716,7 +3842,7 @@ begin
       fWriter.EchoRemove(fFamily.fEchoRemoteEvent);
     end;
   end else begin
-    // fDisableRemoteLog=true -> already within the mutex
+    // fDisableRemoteLog=true -> add to events, already within the global mutex
     fDisableRemoteLog := false;
     fWriter.EchoAdd(fFamily.fEchoRemoteEvent);
     LeaveCriticalSection(GlobalThreadLock);
@@ -5494,6 +5620,8 @@ const
   _TSynMapUnit = 'Symbol:TSynMapSymbol FileName:RawUTF8 Line,Addr:TIntegerDynArray';
 
 initialization
+  assert(ord(sfLocal7)=23);
+  assert(ord(ssDebug)=7);
   InitializeCriticalSection(GlobalThreadLock); // will be deleted with the process
   {$ifndef NOEXCEPTIONINTERCEPT}
   DefaultSynLogExceptionToStr := InternalDefaultSynLogExceptionToStr;
