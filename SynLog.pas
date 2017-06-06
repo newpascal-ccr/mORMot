@@ -120,9 +120,9 @@ uses
 {$ifndef LVCL}
   SyncObjs, // for TEvent
   Contnrs,  // for TObjectList
-{$ifdef HASINLINE}
+  {$ifdef HASINLINENOTX86}
   Types,
-{$endif}
+  {$endif}
 {$endif}
 {$ifndef NOVARIANTS}
   Variants,
@@ -158,7 +158,7 @@ type
     FileName: RawUTF8;
     /// list of all mapped source code lines of this unit
     Line: TIntegerDynArray;
-    /// start code address of each source code lin
+    /// start code address of each source code line
     Addr: TIntegerDynArray;
   end;
   /// a dynamic array of units, as decoded by TSynMapFile from a .map file
@@ -222,7 +222,10 @@ type
     function FindSymbol(aAddressOffset: integer): integer;
     /// retrieve an unit and source line, according to a relative code address
     // - use fast O(log n) binary search
-    function FindUnit(aAddressOffset: integer; out LineNumber: integer): integer;
+    function FindUnit(aAddressOffset: integer; out LineNumber: integer): integer; overload;
+    /// retrieve an unit information, according to the unit name
+    // - will search within Units array
+    function FindUnit(const aUnitName: RawUTF8): integer; overload;
     /// return the symbol location according to the supplied absolute address
     // - i.e. unit name, symbol name and line number (if any), as plain text
     // - returns '' if no match found
@@ -230,6 +233,9 @@ type
     /// return the symbol location according to the supplied ESynException
     // - i.e. unit name, symbol name and line number (if any), as plain text
     class function FindLocation(exc: ESynException): RawUTF8; overload;
+    /// returns the file name of
+    // - if unitname = '', returns the main file name of the current executable
+    class function FindFileName(const unitname: RawUTF8): TFileName;
     /// all symbols associated to the executable
     property Symbols: TSynMapSymbolDynArray read fSymbol;
     /// all units, including line numbers, associated to the executable
@@ -612,7 +618,7 @@ type
     // RotateFileDailyAtHour are set (the high resolution frequency is set
     // in the log file header, so expects a single file)
     property HighResolutionTimeStamp: boolean read fHRTimeStamp write fHRTimeStamp;
-    /// by default, time logging will use error-safe UTC as reference
+    /// by default, time logging will use error-safe UTC values as reference
     // - you may set this property to TRUE to store local time instead
     property LocalTimeStamp: boolean read fLocalTimeStamp write fLocalTimeStamp;
     /// if TRUE, will log the unit name with an object instance if available
@@ -782,7 +788,7 @@ type
      aTypeInfo: pointer; var aValue; Instance: TObject=nil); overload;
     // any call to this method MUST call LogTrailerUnLock
     function LogHeaderLock(Level: TSynLogInfo; AlreadyLocked: boolean): boolean;
-    procedure LogTrailerUnLock(Level: TSynLogInfo); {$ifdef HASINLINE}inline;{$endif}
+    procedure LogTrailerUnLock(Level: TSynLogInfo); {$ifdef HASINLINENOTX86}inline;{$endif}
     procedure LogCurrentTime;
     procedure LogFileInit; virtual;
     procedure LogFileHeader; virtual;
@@ -795,7 +801,7 @@ type
     function GetFileSize: Int64; virtual;
     procedure PerformRotation; virtual;
     procedure AddRecursion(aIndex: integer; aLevel: TSynLogInfo);
-    procedure LockAndGetThreadContext; {$ifdef HASINLINE}inline;{$endif}
+    procedure LockAndGetThreadContext; {$ifdef HASINLINENOTX86}inline;{$endif}
     procedure GetThreadContextInternal;
     procedure ThreadContextRehash;
     function Instance: TSynLog;
@@ -909,10 +915,10 @@ type
     // - is just a wrapper around Family.SynLog - the same code will work:
     // ! TSynLogDB.Family.SynLog.Log(llError,'The % statement didn't work',[SQL]);
     class function Add: TSynLog;
-      {$ifdef HASINLINE}inline;{$endif}
+      {$ifdef HASINLINENOTX86}inline;{$endif}
     /// retrieve the family of this TSynLog class type
     class function Family: TSynLogFamily; overload;
-      {$ifdef HASINLINE}inline;{$endif}
+      {$ifdef HASINLINENOTX86}inline;{$endif}
     /// returns a logging class which will never log anything
     // - i.e. a TSynLog sub-class with Family.Level := []
     class function Void: TSynLogClass;
@@ -978,7 +984,7 @@ type
     /// allows to identify the current thread with a textual representation
     // - would append an sllInfo entry with "SetThreadName ThreadID=Name" text
     // - entry would also be replicated at the begining of any rotated log file
-    procedure LogThreadName(const Name: RawUTF8);
+    procedure LogThreadName(const Name: RawUTF8; IgnoreIfAlreadySet: boolean=false);
     /// call this method to add some multi-line information to the log at a
     // specified level
     // - LinesToLog content will be added, one line per one line, delimited by
@@ -998,7 +1004,7 @@ type
     procedure DisableRemoteLog(value: boolean);
     /// the associated TSynLog class
     function LogClass: TSynLogClass;
-      {$ifdef HASINLINE}inline;{$endif}
+      {$ifdef HASINLINENOTX86}inline;{$endif}
     /// direct access to the low-level writing content
     // - should usually not be used directly, unless you ensure it is safe
     property Writer: TTextWriter read fWriter;
@@ -1511,13 +1517,24 @@ uses
   {$endif} ;
 {$endif}
 
-function ToText(event: TSynLogInfo): RawUTF8;
+var
+  LogInfoText: array[TSynLogInfo] of RawUTF8;
+  LogInfoCaptions: array[TSynLogInfo] of string;
+
+procedure ComputeLogInfoText;
+var
+  E: TSynLogInfo;
 begin
-  result := TrimLeftLowerCaseShort(GetEnumName(TypeInfo(TSynLogInfo),ord(event)));
+  for E := low(E) to high(E) do
+    LogInfoText[E] := TrimLeftLowerCaseShort(GetEnumName(TypeInfo(TSynLogInfo),ord(E)));
 end;
 
-var
-  LogInfoCaptions: array[TSynLogInfo] of string;
+function ToText(event: TSynLogInfo): RawUTF8;
+begin
+  if LogInfoText[low(event)]='' then
+    ComputeLogInfoText;
+  result := LogInfoText[event];
+end;
 
 function ToCaption(event: TSynLogInfo): string;
 var
@@ -1664,7 +1681,7 @@ constructor TSynMapFile.Create(const aExeName: TFileName=''; MabCreate: boolean=
         if GetCode(Sym.Start) then begin
           while (P<PEnd) and (P^=' ') do inc(P);
           Beg := pointer(P);
-          {$ifdef HASINLINE}
+          {$ifdef ISDELPHI2005ANDUP}
           // trim left 'UnitName.' for each symbol (since Delphi 2005)
           case PWord(P)^ of // ignore RTL namespaces
           ord('S')+ord('y') shl 8:
@@ -1692,7 +1709,7 @@ constructor TSynMapFile.Create(const aExeName: TFileName=''; MabCreate: boolean=
             Beg := pointer(P);
           end else
             P := pointer(Beg); // no '.' found
-          {$endif}
+          {$endif ISDELPHI2005ANDUP}
           while (P<PEnd) and (P^>' ') do inc(P);
           SetString(Sym.Name,Beg,P-Beg);
           if (Sym.Name<>'') and not (Sym.Name[1] in ['$','?']) then
@@ -2184,6 +2201,32 @@ begin
     result := GetInstanceMapFile.FindLocation(PtrUInt(exc.RaisedAt));
 end;
 
+function TSynMapFile.FindUnit(const aUnitName: RawUTF8): integer;
+begin
+  if (self<>nil) and (aUnitName<>'') then
+    for result := 0 to high(fUnit) do
+      if IdemPropNameU(fUnit[result].Symbol.Name,aUnitName) then
+        exit;
+  result := -1;
+end;
+
+class function TSynMapFile.FindFileName(const unitname: RawUTF8): TFileName;
+var map: TSynMapFile;
+    name: RawUTF8;
+    u: integer;
+begin
+  result := '';
+  map := GetInstanceMapFile;
+  if map = nil then
+    exit;
+  if unitname='' then
+    name := ExeVersion.ProgramName else
+    name := unitname;
+  u := map.FindUnit(name);
+  if u>=0 then
+    result := UTF8ToString(map.fUnit[u].FileName);
+end;
+
 
 { TSynLogFamily }
 
@@ -2300,7 +2343,7 @@ begin
       inc(P,25); // trim e.g. '00000000089E5A13  " info '
       dec(len,25);
     end;
-  while (len>0) and (P^<=' ') do begin
+  while (len>0) and (P^<=' ') do begin // trim left spaces
     inc(P);
     dec(len);
   end;
@@ -2325,7 +2368,7 @@ begin
     exit;
   TDocVariantData(result).InitFast(length(info),dvArray);
   for i := 0 to high(info) do
-    TDocVariantData(result).AddItemFromText(ToText(info[i]));
+    TDocVariantData(result).AddItemText(ToText(info[i]));
 end;
 {$endif}
 
@@ -3546,7 +3589,7 @@ begin
 end;
 
 class function TSynLog.Add: TSynLog;
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 var f: TSynLogFamily;
 begin
   if Self<>nil then begin // inlined TSynLog.Family (Add is already inlined)
@@ -3682,7 +3725,7 @@ begin // private sub function makes the code faster in most case
   end;
 end;
 
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 class function TSynLog.Family: TSynLogFamily;
 begin
   if Self<>nil then begin
@@ -3810,11 +3853,13 @@ begin
     DoLog(LinesToLog);
 end;
 
-procedure TSynLog.LogThreadName(const Name: RawUTF8);
+procedure TSynLog.LogThreadName(const Name: RawUTF8; IgnoreIfAlreadySet: boolean);
 begin
   if (self<>nil) and (sllInfo in fFamily.fLevel) then
     if LogHeaderLock(sllInfo,false) then // inlined LogInternal
     try
+      if IgnoreIfAlreadySet and (fThreadContext^.ThreadName<>'') then
+        exit;
       fWriter.Add('SetThreadName %=%',[pointer(fThreadID),Name],twOnSameLine);
       fThreadContext^.ThreadName := Name;
     finally
@@ -4334,7 +4379,8 @@ begin
       fWriterStream.Seek(0,soFromEnd); // in rotation mode, append at the end
   end;
   if fWriterClass=nil then
-    fWriterClass := TTextWriter;
+    // set to TTextWriter or TJSONSerializer if mORMot.pas is linked
+    fWriterClass := TTextWriter.GetDefaultJSONClass;
   if fWriter=nil then begin
     fWriter := fWriterClass.Create(fWriterStream,fFamily.BufferSize);
     fWriter.CustomOptions := fWriter.CustomOptions+[twoEnumSetsAsTextInRecord,twoFullSetsAsStar];

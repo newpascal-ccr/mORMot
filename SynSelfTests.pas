@@ -179,6 +179,7 @@ uses
   dddInfraRepoUser,
   ECCProcess,
 {$endif DELPHI5OROLDER}
+  SynProtoRTSPHTTP,
 {$ifdef TEST_REGEXP}
   SynSQLite3RegEx,
 {$endif TEST_REGEXP}
@@ -316,6 +317,8 @@ type
     procedure _TObjectListHashed;
     /// test TSynNameValue class
     procedure _TSynNameValue;
+    /// test TRawUTF8Interning process
+    procedure _TRawUTF8Interning;
     {$ifndef DELPHI5OROLDER}
     /// test TObjectDynArrayWrapper class
     procedure _TObjectDynArrayWrapper;
@@ -340,6 +343,8 @@ type
     procedure NumericalConversions;
     /// test crc32c in both software and hardware (SSE4.2) implementations
     procedure _crc32c;
+    /// test RDRAND Intel x86/x64 opcode if available, or fast gsl_rng_taus2
+    procedure _Random32;
     /// test TSynBloomFilter class
     procedure BloomFilters;
     /// the new fast Currency to/from string conversion
@@ -466,6 +471,8 @@ type
   /// this test case will test most functions, classes and types defined and
   // implemented in the SynCrypto unit
   TTestCryptographicRoutines = class(TSynTestCase)
+  public
+    procedure CryptData(dpapi: boolean);
   published
     /// Adler32 hashing functions
     procedure _Adler32;
@@ -485,6 +492,12 @@ type
     procedure _CompressShaAes;
     /// AES-based pseudorandom number generator
     procedure _TAESPNRG;
+    /// CryptDataForCurrentUser() function
+    procedure _CryptDataForCurrentUser;
+    {$ifdef MSWINDOWS}
+    /// CryptDataForCurrentUserAPI() function
+    procedure _CryptDataForCurrentUserAPI;
+    {$endif MSWINDOWS}
     {$ifndef NOVARIANTS}
     /// JWT classes
     procedure _JWT;
@@ -520,6 +533,12 @@ type
     procedure ECDHEStreamProtocol;
   end;
 
+  /// this test case will validate several low-level protocols
+  TTestProtocols = class(TSynTestCase)
+  published
+    /// RTSP over HTTP, as implemented in SynProtoRTSPHTTP unit
+    procedure RTSPOverHTTP;
+  end;
 
 {$ifdef MSWINDOWS}
 {$ifndef LVCL}
@@ -1825,7 +1844,7 @@ type
     Data: string;
   end;
   TDataItems = array of TDataItem;
-   
+
 function FVSort(const A,B): integer;
 begin
   result := SysUtils.StrComp(PChar(pointer(TFV(A).Detailed)),PChar(pointer(TFV(B).Detailed)));
@@ -1837,6 +1856,7 @@ var AI, AI2: TIntegerDynArray;
     AR: TRecs;
     AF: TFVs;
     AF2: TFV2s;
+    h: cardinal;
     i,j,k,Len, count,AIcount: integer;
     U,U2: RawUTF8;
     P: PUTF8Char;
@@ -1850,6 +1870,8 @@ var AI, AI2: TIntegerDynArray;
     AV: TSynValidates;
     V: TSynValidate;
     AIP, AI2P, AUP, ARP, AFP, ACities, AVP, dyn1,dyn2: TDynArray;
+    dyniter: TDynArrayLoadFrom;
+    B: boolean;
     dp: TDataItem;
     dyn1Array,dyn2Array: TDataItems;
     Test, Test2: RawByteString;
@@ -1916,6 +1938,12 @@ begin
   end;
 end;
 begin
+  h := TypeInfoToHash(TypeInfo(TAmount));
+  Check(h=$9032161B,'TypeInfoToHash(TAmount)');
+  h := TypeInfoToHash(TypeInfo(TAmountCollection));
+  Check(h=$887ED692,'TypeInfoToHash(TAmountCollection)');
+  h := TypeInfoToHash(TypeInfo(TAmountICollection));
+  Check(h=$4051BAC,'TypeInfoToHash(TAmountICollection)');
   W := TTextWriter.CreateOwnedStream;
   // validate TBooleanDynArray
   dyn1.Init(TypeInfo(TBooleanDynArray),AB);
@@ -1940,6 +1968,18 @@ begin
   Check(dyn1.Count=4);
   for i := 0 to 3 do
     Check(AB[i]=(i and 1=1));
+  Check(dyniter.Init(TypeInfo(TBooleanDynArray),pointer(test)));
+  Check(dyniter.Count=4);
+  for i := 0 to 3 do begin
+    Check(dyniter.FirstField(B));
+    Check(B=(i and 1=1));
+    B := not B;
+    Check(dyniter.Step(B));
+    Check(B=(i and 1=1));
+  end;
+  Check(not dyniter.Step(B));
+  Check(not dyniter.FirstField(B));
+  Check(dyniter.CheckHash);
   // validate TIntegerDynArray
   Test64K;
   AIP.Init(TypeInfo(TIntegerDynArray),AI);
@@ -2115,6 +2155,20 @@ begin
   Check(P=nil);
   AUP.Clear;
   Check(AUP.LoadFrom(pointer(Test))-pointer(Test)=length(Test));
+  for i := 0 to 1000 do
+    Check(GetInteger(pointer(AU[i]))=i+1000);
+  Check(dyniter.Init(TypeInfo(TRawUTF8DynArray),pointer(test)));
+  Check(dyniter.Count=1001);
+  for i := 0 to 1000 do begin
+    Check(dyniter.FirstField(U2));
+    Check(GetInteger(pointer(U2))=i+1000);
+    U2 := '';
+    Check(dyniter.Step(U2));
+    Check(GetInteger(pointer(U2))=i+1000);
+  end;
+  Check(not dyniter.Step(U2));
+  Check(not dyniter.FirstField(U2));
+  Check(dyniter.CheckHash);
   AUP.Clear;
   Check(AUP.LoadFromJSON(pointer(U))<>nil);
   for i := 0 to 1000 do
@@ -2289,6 +2343,15 @@ begin
     Fill(F,i);
     Check(AFP.IndexOf(F)=i);
   end;
+  Check(dyniter.Init(TypeInfo(TFVs),pointer(test)));
+  Check(dyniter.Count=1001);
+  for i := 0 to 1000 do begin
+    Check(dyniter.Step(F1));
+    Fill(F,i);
+    Check(AFP.ElemEquals(F,F1));
+  end;
+  Check(not dyniter.Step(F1));
+  Check(dyniter.CheckHash);
   ST := THeapMemoryStream.Create;
   AFP.SaveToStream(ST);
   AFP.Clear;
@@ -2719,6 +2782,112 @@ begin
   end;
 end;
 
+procedure TTestLowLevelCommon._Random32;
+var i: integer;
+    c: array[0..1000] of cardinal;
+begin
+  for i := 0 to high(c) do
+    c[i] := Random32;
+  QuickSortInteger(@c,0,high(c));
+  for i := 1 to high(c) do
+    Check(c[i+1]<>c[i],'unique Random32');
+  Check(Random32(0)=0);
+  for i := 1 to 100000 do
+    Check(Random32(i)<cardinal(i));
+  for i := 0 to 100000 do
+    Check(Random32(maxInt-i)<cardinal(maxInt-i));
+end;
+
+procedure TTestLowLevelCommon._TRawUTF8Interning;
+var int: TRawUTF8Interning;
+    i,v: integer;
+    tmp: RawUTF8;
+    vs: TRawUTF8DynArray;
+    timer: TPrecisionTimer;
+const MAX=500000;
+      DIRSIZE = 16*(MAX+1); // assume each SmallUInt32UTF8[] uses 16 heap bytes 
+      INTSIZE = 512*16;
+begin
+  {$ifndef HASINLINE} // inlining induces optimizations which trigger Clean
+  int := TRawUTF8Interning.Create(1);
+  try
+    check(int.Count=0);
+    check(int.Unique('test')='test');
+    check(int.Count=1);
+    check(int.Unique('test')='test');
+    check(int.Count=1);
+    check(int.Clean=0);
+    check(int.Unique('single')='single');
+    check(int.Count=2);
+    check(int.Clean=1);
+    check(int.Count=1);
+    check(int.Clean=0);
+    check(int.Count=1);
+    check(int.Unique('single1')='single1');
+    check(int.Count=2);
+    check(int.Unique('test2')='test2');
+    check(int.Count=3);
+    check(int.Unique('test2')='test2');
+    check(int.Count=3);
+    check(int.Unique('single2')='single2');
+    check(int.Count=4);
+    check(int.Clean=2);
+    check(int.Count=2);
+    int.Clear;
+    check(int.Count=0);
+    check(int.Clean=0);
+    check(int.Count=0);
+  finally
+    int.Free;
+  end;
+  {$endif HASINLINE}
+  int := TRawUTF8Interning.Create(16);
+  try
+    for i := 0 to MAX do begin
+      v := i and 511;
+      int.Unique(tmp,SmallUInt32UTF8[v]);
+      check(UTF8ToInteger(tmp)=v);
+    end;
+    check(int.Count=512);
+    check(int.Clean=0);
+    check(int.Count=512);
+  finally
+    int.Free;
+  end;
+  int := TRawUTF8Interning.Create(4);
+  try
+    SetLength(vs,MAX+1);
+    timer.Start;
+    for i := 0 to MAX do begin
+      v := i and 511;
+      int.Unique(vs[i],pointer(SmallUInt32UTF8[v]),length(SmallUInt32UTF8[v]));
+    end;
+    NotifyTestSpeed(Format('interning %s',[KB(INTSIZE)]),MAX,DIRSIZE,@timer);
+    for i := 0 to MAX do
+      check(UTF8ToInteger(vs[i])=i and 511);
+    check(int.Count=512);
+    check(int.Clean=0);
+    check(int.Count=512);
+    for i := 0 to MAX do
+      check(UTF8ToInteger(vs[i])=i and 511);
+    vs := nil;
+    check(int.Count=512);
+    check(int.Clean=512);
+    check(int.Count=0);
+  finally
+    int.Free;
+  end;
+  SetLength(vs,MAX+1);
+  timer.Start;
+  for i := 0 to MAX do begin
+    v := i and 511;
+    SetString(vs[i],PAnsiChar(pointer(SmallUInt32UTF8[v])),length(SmallUInt32UTF8[v]));
+  end;
+  NotifyTestSpeed(Format('direct %s',[KB(DIRSIZE)]),MAX,DIRSIZE,@timer);
+  for i := 0 to MAX do
+    check(UTF8ToInteger(vs[i])=i and 511);
+end;
+
 function kr32reference(buf: PAnsiChar; len: cardinal): cardinal;
 var i: integer;
 begin
@@ -2952,6 +3121,13 @@ var i, j, b, err: integer;
     crc: cardinal;
     Timer: TPrecisionTimer;
 begin
+  Check(Plural('row',0)='0 row');
+  Check(Plural('row',1)='1 row');
+  Check(Plural('row',2)='2 rows');
+  Check(Plural('row',20)='20 rows');
+  Check(Plural('row',200000)='200000 rows');
+  Check(not SameValue(386.0, 386.1));
+  Check(not SameValue(386.0, 700, 2));
   Check(IntToThousandString(0)='0');
   Check(IntToThousandString(1)='1');
   Check(IntToThousandString(10)='10');
@@ -3161,6 +3337,7 @@ begin
     s := ExtendedToStr(d,DOUBLE_PRECISION);
     e := GetExtended(Pointer(s),err);
     Check(SameValue(e,d));
+    Check(not SameValue(e+1,d));
     u := DoubleToString(d);
     Check(Ansi7ToString(s)=u,u);
     PC := ToVarUInt32(juint,@varint);
@@ -4275,7 +4452,7 @@ begin
     if trunc(ExpectedDate)=40640 then
       Check(L.InstanceName='D:\Dev\MyLibrary.dll') else
       Check(L.InstanceName='');
-    CheckSame(L.ExecutableDate,ExpectedDate,1e-7);
+    CheckSame(L.ExecutableDate,ExpectedDate,1/SecsPerDay);
     Check(L.ComputerHost='MyPC');
     Check(L.LevelUsed=[sllEnter,sllLeave,sllDebug]);
     Check(L.RunningUser='MySelf');
@@ -4286,12 +4463,12 @@ begin
     Check(not L.Wow64);
     {$endif}
     Check(L.Freq=0);
-    CheckSame(L.StartDateTime,40640.502882,1E-10);
+    CheckSame(L.StartDateTime,40640.502882,1/SecsPerDay);
     if CheckFailed(L.Count=3) then
       exit;
     Check(L.EventLevel[0]=sllEnter);
     Check(L.EventLevel[1]=sllDebug);
-    CheckSame(L.EventDateTime(1),L.StartDateTime,1 / SecsPerDay);
+    CheckSame(L.EventDateTime(1),L.StartDateTime,1/SecsPerDay);
     Check(L.EventLevel[2]=sllLeave);
     if CheckFailed(L.LogProcCount=1) then
       exit;
@@ -5547,6 +5724,11 @@ begin
     tmp := J;
     Check(JSONToObject(CA,UniqueRawUTF8(RawUTF8(tmp)),Valid)=nil);
     Check(Valid);
+    Check(CA.One.Color=2);
+    Check(CA.One.Name='test2');
+    if not CheckFailed(CA.Coll.Count=1) then
+      Check(CA.Coll[0].Name='test');
+    Check(CA.One.Length=10);
     Check(CA.Str.Count=10000);
     for i := 1 to CA.Str.Count do
       Check(CA.Str[i-1]=IntToStr(i));
@@ -6317,183 +6499,215 @@ begin
     O2.Free;
     O.Free;
   end;
-   U := '"filters":[{"name":"name1","value":"value1","comparetype":">"},'+
-     '{"name":"name2","value":"value2","comparetype":"="}], "Limit":100}';
-   P := UniqueRawUTF8(U);
-   Check(GetJSONPropName(P)='filters');
-   Check((P<>nil)and(P^='['));
-   P := GotoNextJSONItem(P,1,@EndOfObject);
-   Check(EndOfObject=',');
-   Check(GetJSONPropName(P)='Limit');
-   Check((P<>nil)and(P^='1'));
-   P := GotoNextJSONItem(P,1,@EndOfObject);
-   Check(P<>nil);
-   Check(EndOfObject='}');
+  U := '"filters":[{"name":"name1","value":"value1","comparetype":">"},'+
+    '{"name":"name2","value":"value2","comparetype":"="}], "Limit":100}';
+  P := UniqueRawUTF8(U);
+  Check(GetJSONPropName(P)='filters');
+  Check((P<>nil)and(P^='['));
+  P := GotoNextJSONItem(P,1,@EndOfObject);
+  Check(EndOfObject=',');
+  Check(GetJSONPropName(P)='Limit');
+  Check((P<>nil)and(P^='1'));
+  P := GotoNextJSONItem(P,1,@EndOfObject);
+  Check(P<>nil);
+  Check(EndOfObject='}');
 {$ifndef LVCL}
   C2 := TCollTst.Create;
   Coll := TCollTst.Create;
   try
-     U := ObjectToJSON(Coll);
-     Check(Hash32(U)=$95B54414);
-     Check(ObjectToJSON(C2)=U);
-     Coll.One.Name := 'test"\2';
-     Coll.One.Color := 1;
-     U := ObjectToJSON(Coll);
-     Check(Hash32(U)=$CE2C2DED);
-     Check(JSONToObject(C2,pointer(U),Valid)=nil);
-     Check(Valid);
-     U := ObjectToJSON(C2);
-     Check(Hash32(U)=$CE2C2DED);
-     Coll.Coll.Add.Color := 10;
-     Coll.Coll.Add.Name := 'name';
-     Check(Coll.Coll.Count=2);
-     U := ObjectToJSON(Coll);
-     Check(Hash32(U)=$36B02F0E);
-     Check(JSONToObject(C2,pointer(U),Valid)=nil);
-     Check(Valid);
-     Check(C2.Coll.Count=2);
-     U := ObjectToJSON(C2);
-     Check(Hash32(U)=$36B02F0E);
-     J := ObjectToJSON(Coll,[woHumanReadable]);
-     Check(Hash32(J)=$9FAFF11F);
-     Check(JSONReformat(J,jsonCompact)=U);
-     Check(JSONReformat('{ "empty": {} }')='{'#$D#$A#9'"empty": {'#$D#$A#9#9'}'#$D#$A'}');
-     U := ObjectToJSON(Coll,[woStoreClassName]);
-     Check(U='{"ClassName":"TCollTst","One":{"ClassName":"TCollTest","Color":1,'+
-       '"Length":0,"Name":"test\"\\2"},"Coll":[{"ClassName":"TCollTest","Color":10,'+
-       '"Length":0,"Name":""},{"ClassName":"TCollTest","Color":0,"Length":0,"Name":"name"}]}');
-     C2.Coll.Clear;
-     Check(JSONToObject(C2,pointer(U),Valid)=nil);
-     Check(Valid);
-     Check(C2.Coll.Count=2);
-     U := ObjectToJSON(C2);
-     Check(Hash32(U)=$36B02F0E);
-     TJSONSerializer.RegisterClassForJSON([TComplexNumber,TCollTst]);
-     J := '{"ClassName":"TComplexNumber", "Real": 10.3, "Imaginary": 7.92 }';
-     P := UniqueRawUTF8(J); // make local copy of constant
-     Comp := TComplexNumber(JSONToNewObject(P,Valid));
-     if not CheckFailed(Comp<>nil) then begin
-       Check(Valid);
-       Check(Comp.ClassType=TComplexNumber);
-       CheckSame(Comp.Real,10.3);
-       CheckSame(Comp.Imaginary,7.92);
-       U := ObjectToJSON(Comp,[woStoreClassName]);
-       Check(U='{"ClassName":"TComplexNumber","Real":10.3,"Imaginary":7.92}');
-       Comp.Free;
-     end;
-     TJSONSerializer.RegisterCollectionForJSON(TMyCollection,TCollTest);
-     TestMyColl(TMyCollection.Create(TCollTest));
-     Instance.Init(TMyCollection);
-     TestMyColl(Instance.CreateNew as TMyCollection);
-     C2.Coll.Clear;
-     U := ObjectToJSON(C2);
-     Check(Hash32(U)=$CE2C2DED);
-     Coll.Coll.BeginUpdate;
-     for i := 1 to 10000 do
-       with Coll.Coll.Add do begin
-         Color := i*3;
-         Length := i*5;
-         Name := Int32ToUtf8(i);
-       end;
-     Coll.Coll.EndUpdate;
-     U := ObjectToJSON(Coll.Coll);
-     Check(Hash32(U)=$DB782098);
-     C2.Coll.Clear;
-     Check(JSONToObject(C2.fColl,pointer(U),Valid)=nil);
-     Check(Valid);
-     Check(C2.Coll.Count=Coll.Coll.Count);
-     for i := 1 to C2.Coll.Count-2 do
-       with C2.Coll[i+1] do begin
-         Check(Color=i*3);
-         Check(Length=i*5);
-         Check(Name=Int32ToUtf8(i));
-       end;
-     U := ObjectToJSON(Coll);
-     Check(length(U)=443103);
-     Check(Hash32(U)=$7EACF12A);
-     C2.One.Name := '';
-     C2.Coll.Clear;
-     Check(JSONToObject(C2,pointer(U),Valid)=nil);
-     Check(Valid);
-     Check(C2.Coll.Count=Coll.Coll.Count);
-     U := ObjectToJSON(C2);
-     Check(length(U)=443103);
-     Check(Hash32(U)=$7EACF12A);
-     for i := 1 to C2.Coll.Count-2 do
-       with C2.Coll[i+1] do begin
-         Check(Color=i*3);
-         Check(Length=i*5);
-         Check(Name=Int32ToUtf8(i));
-       end;
-     Coll.Coll.Clear;
-     Coll.Str := TStringList.Create;
-     Coll.Str.BeginUpdate;
-     for i := 1 to 10000 do
-       Check(Coll.Str.Add(IntToStr(i))=i-1);
-     Coll.Str.EndUpdate;
-     U := ObjectToJSON(Coll);
-     Check(Hash32(U)=$85926050);
-     J := ObjectToJSON(Coll,[woHumanReadable]);
-     U2 := JSONReformat(J,jsonCompact);
-     Check(U2=U);
-     C2.Str := TStringList.Create;
-     Check(JSONToObject(C2,pointer(U),Valid)=nil);
-     Check(Valid);
-     Check(C2.Str.Count=Coll.Str.Count);
-     for i := 1 to C2.Str.Count do
-       Check(C2.Str[i-1]=IntToStr(i));
-     J := ObjectToJSON(C2);
-     Check(Hash32(J)=$85926050);
-     C2.One.Color := 0;
-     C2.One.Name := '';
-     U := '{"One":{"Color":1,"Length":0,"Name":"test","Unknown":123},"Coll":[]}';
-     Check(JSONToObject(C2,UniqueRawUTF8(U),Valid,nil,[j2oIgnoreUnknownProperty])=nil,'Ignore unknown');
-     Check(Valid);
-     Check(C2.One.Color=1);
-     Check(C2.One.Name='test');
-     C2.One.Color := 0;
-     C2.One.Name := '';
-     U := '{"One":{"Color":1,"Length":0,"wtf":{"one":1},"Name":"test","Unknown":123},"dummy":null,"Coll":[]}';
-     Check(JSONToObject(C2,UniqueRawUTF8(U),Valid,nil,[j2oIgnoreUnknownProperty])=nil,'Ignore unknown');
-     Check(Valid);
-     Check(C2.One.Color=1);
-     Check(C2.One.Name='test');
-     U := '{"One":{"Color":1,"Length":0,"Name":"test\"\\2},"Coll":[]}';
-     Check(IdemPChar(JSONToObject(C2,UniqueRawUTF8(U),Valid),'"TEST'),'invalid JSON');
-     Check(not Valid);
-     U := '{"One":{"Color":1,"Length":0,"Name":"test\"\\2"},"Coll":[]';
-     Check(JSONToObject(C2,UniqueRawUTF8(U),Valid)<>nil);
-     Check(not Valid);
-     U := '{"One":{"Color":,"Length":0,"Name":"test\"\\2"},"Coll":[]';
-     Check(JSONToObject(C2,UniqueRawUTF8(U),Valid)<>nil,'invalid JSON');
-     Check(not Valid);
-     U := '{"Coll":[{"Color":1,"Length":0,"Name":"test"}],'+
-       '"One":{"Color":2,"Length":0,"Name":"test2"}}';
-     Check(JSONToObject(C2,UniqueRawUTF8(U),Valid,nil,[j2oIgnoreUnknownProperty])=nil,'Ignore unknown');
-     Check(Valid);
-     Check(C2.One.Color=2);
-     Check(C2.One.Name='test2');
-     Check(C2.Coll.Count=1);
-     Check(C2.Coll[0].Name='test');
+    U := ObjectToJSON(Coll);
+    Check(Hash32(U)=$95B54414);
+    Check(ObjectToJSON(C2)=U);
+    Coll.One.Name := 'test"\2';
+    Coll.One.Color := 1;
+    U := ObjectToJSON(Coll);
+    Check(Hash32(U)=$CE2C2DED);
+    Check(JSONToObject(C2,pointer(U),Valid)=nil);
+    Check(Valid);
+    U := ObjectToJSON(C2);
+    Check(Hash32(U)=$CE2C2DED);
+    Coll.Coll.Add.Color := 10;
+    Coll.Coll.Add.Name := 'name';
+    Check(Coll.Coll.Count=2);
+    U := ObjectToJSON(Coll);
+    Check(Hash32(U)=$36B02F0E);
+    Check(JSONToObject(C2,pointer(U),Valid)=nil);
+    Check(Valid);
+    Check(C2.Coll.Count=2);
+    U := ObjectToJSON(C2);
+    Check(Hash32(U)=$36B02F0E);
+    J := ObjectToJSON(Coll,[woHumanReadable]);
+    Check(Hash32(J)=$9FAFF11F);
+    Check(JSONReformat(J,jsonCompact)=U);
+    Check(JSONReformat('{ "empty": {} }')='{'#$D#$A#9'"empty": {'#$D#$A#9#9'}'#$D#$A'}');
+    U := ObjectToJSON(Coll,[woStoreClassName]);
+    Check(U='{"ClassName":"TCollTst","One":{"ClassName":"TCollTest","Color":1,'+
+      '"Length":0,"Name":"test\"\\2"},"Coll":[{"ClassName":"TCollTest","Color":10,'+
+      '"Length":0,"Name":""},{"ClassName":"TCollTest","Color":0,"Length":0,"Name":"name"}]}');
+    C2.Coll.Clear;
+    Check(JSONToObject(C2,pointer(U),Valid)=nil);
+    Check(Valid);
+    Check(C2.Coll.Count=2);
+    U := ObjectToJSON(C2);
+    Check(Hash32(U)=$36B02F0E);
+    TJSONSerializer.RegisterClassForJSON([TComplexNumber,TCollTst]);
+    J := '{"ClassName":"TComplexNumber", "Real": 10.3, "Imaginary": 7.92 }';
+    P := UniqueRawUTF8(J); // make local copy of constant
+    Comp := TComplexNumber(JSONToNewObject(P,Valid));
+    if not CheckFailed(Comp<>nil) then begin
+      Check(Valid);
+      Check(Comp.ClassType=TComplexNumber);
+      CheckSame(Comp.Real,10.3);
+      CheckSame(Comp.Imaginary,7.92);
+      U := ObjectToJSON(Comp,[woStoreClassName]);
+      Check(U='{"ClassName":"TComplexNumber","Real":10.3,"Imaginary":7.92}');
+      Comp.Free;
+    end;
+    TJSONSerializer.RegisterCollectionForJSON(TMyCollection,TCollTest);
+    TestMyColl(TMyCollection.Create(TCollTest));
+    Instance.Init(TMyCollection);
+    TestMyColl(Instance.CreateNew as TMyCollection);
+    C2.Coll.Clear;
+    U := ObjectToJSON(C2);
+    Check(Hash32(U)=$CE2C2DED);
+    Coll.Coll.BeginUpdate;
+    for i := 1 to 10000 do
+      with Coll.Coll.Add do begin
+        Color := i*3;
+        Length := i*5;
+        Name := Int32ToUtf8(i);
+      end;
+    Coll.Coll.EndUpdate;
+    U := ObjectToJSON(Coll.Coll);
+    Check(Hash32(U)=$DB782098);
+    C2.Coll.Clear;
+    Check(JSONToObject(C2.fColl,pointer(U),Valid)=nil);
+    Check(Valid);
+    Check(C2.Coll.Count=Coll.Coll.Count);
+    for i := 1 to C2.Coll.Count-2 do
+      with C2.Coll[i+1] do begin
+        Check(Color=i*3);
+        Check(Length=i*5);
+        Check(Name=Int32ToUtf8(i));
+      end;
+    U := ObjectToJSON(Coll);
+    Check(length(U)=443103);
+    Check(Hash32(U)=$7EACF12A);
+    C2.One.Name := '';
+    C2.Coll.Clear;
+    Check(JSONToObject(C2,pointer(U),Valid)=nil);
+    Check(Valid);
+    Check(C2.Coll.Count=Coll.Coll.Count);
+    U := ObjectToJSON(C2);
+    Check(length(U)=443103);
+    Check(Hash32(U)=$7EACF12A);
+    for i := 1 to C2.Coll.Count-2 do
+      with C2.Coll[i+1] do begin
+        Check(Color=i*3);
+        Check(Length=i*5);
+        Check(Name=Int32ToUtf8(i));
+      end;
+    Coll.Coll.Clear;
+    Coll.Str := TStringList.Create;
+    Coll.Str.BeginUpdate;
+    for i := 1 to 10000 do
+      Check(Coll.Str.Add(IntToStr(i))=i-1);
+    Coll.Str.EndUpdate;
+    U := ObjectToJSON(Coll);
+    Check(Hash32(U)=$85926050);
+    J := ObjectToJSON(Coll,[woHumanReadable]);
+    U2 := JSONReformat(J,jsonCompact);
+    Check(U2=U);
+    C2.Str := TStringList.Create;
+    Check(JSONToObject(C2,pointer(U),Valid)=nil);
+    Check(Valid);
+    Check(C2.Str.Count=Coll.Str.Count);
+    for i := 1 to C2.Str.Count do
+      Check(C2.Str[i-1]=IntToStr(i));
+    J := ObjectToJSON(C2);
+    Check(Hash32(J)=$85926050);
+    C2.One.Color := 0;
+    C2.One.Name := '';
+    U := '{"One":{"Color":1,"Length":0,"Name":"test","Unknown":123},"Coll":[]}';
+    Check(JSONToObject(C2,UniqueRawUTF8(U),Valid,nil,[j2oIgnoreUnknownProperty])=nil,'Ignore unknown');
+    Check(Valid);
+    Check(C2.One.Color=1);
+    Check(C2.One.Name='test');
+    C2.One.Color := 0;
+    C2.One.Name := '';
+    U := '{"One":{"Color":1,"Length":0,"wtf":{"one":1},"Name":"test","Unknown":123},"dummy":null,"Coll":[]}';
+    Check(JSONToObject(C2,UniqueRawUTF8(U),Valid,nil,[j2oIgnoreUnknownProperty])=nil,'Ignore unknown');
+    Check(Valid);
+    Check(C2.One.Color=1);
+    Check(C2.One.Name='test');
+    U := '{"One":{"Color":1,"Length":0,"Name":"test\"\\2},"Coll":[]}';
+    Check(IdemPChar(JSONToObject(C2,UniqueRawUTF8(U),Valid),'"TEST'),'invalid JSON');
+    Check(not Valid);
+    U := '{"One":{"Color":1,"Length":0,"Name":"test\"\\2"},"Coll":[]';
+    Check(JSONToObject(C2,UniqueRawUTF8(U),Valid)<>nil);
+    Check(not Valid);
+    U := '{"One":{"Color":,"Length":0,"Name":"test\"\\2"},"Coll":[]';
+    Check(JSONToObject(C2,UniqueRawUTF8(U),Valid)<>nil,'invalid JSON');
+    Check(not Valid);
+    U := '{"Coll":[{"Color":1,"Length":0,"Name":"test"}],'+
+      '"One":{"Color":2,"Length":0,"Name":"test2"}}';
+    Check(JSONToObject(C2,UniqueRawUTF8(U),Valid,nil,[j2oIgnoreUnknownProperty])=nil,'Ignore unknown');
+    Check(Valid);
+    Check(C2.One.Color=2);
+    Check(C2.One.Name='test2');
+    Check(C2.Coll.Count=1);
+    Check(C2.Coll[0].Name='test');
+    C2.One.Length := 10;
+    J := ObjectToJSON(C2);
+    Check(Hash32(J)=$41281936);
+    // (custom) dynamic array serialization
+    TCollTstDynArrayTest;
+    TTextWriter.RegisterCustomJSONSerializer(TypeInfo(TFVs),
+      TCollTstDynArray.FVReader,TCollTstDynArray.FVWriter);
+    TCollTstDynArrayTest;
+    TTextWriter.RegisterCustomJSONSerializer(TypeInfo(TFVs),
+      TCollTstDynArray.FVReader2,TCollTstDynArray.FVWriter2);
+    TCollTstDynArrayTest;
+    // (custom) class serialization
+    TFileVersionTest(false);
+    TJSONSerializer.RegisterCustomSerializer(TFileVersion,
+      TCollTstDynArray.FVClassReader,TCollTstDynArray.FVClassWriter);
+    TFileVersionTest(true);
+    TJSONSerializer.RegisterCustomSerializer(TFileVersion,nil,nil);
+    TFileVersionTest(false);
+    MyItem := TCollTest.Create(nil);
+    try
+      MyItem.Length := 10;
+      MyItem.Color := 20;
+      MyItem.Name := 'ABC';
+      J := ObjectToJSON(MyItem);
+      Check(J='{"Color":20,"Length":10,"Name":"ABC"}');
+      TJSONSerializer.RegisterCustomSerializerFieldNames(
+        TCollTest,['name','length'],['n','len']);
+      J := ObjectToJSON(MyItem);
+      Check(J='{"Color":20,"len":10,"n":"ABC"}');
+      J := ObjectToJSON(C2);
+      Check(Hash32(J)=$FFBC77A,'RegisterCustomSerializerFieldNames');
+      TCollTstDynArrayTest;
+      TJSONSerializer.RegisterCustomSerializerFieldNames(TCollTest,[],[]);
+      J := ObjectToJSON(MyItem);
+      Check(J='{"Color":20,"Length":10,"Name":"ABC"}');
+      J := ObjectToJSON(C2);
+      Check(Hash32(J)=$41281936,'unRegisterCustomSerializerFieldNames');
+      TCollTstDynArrayTest;
+      TJSONSerializer.RegisterCustomSerializerFieldNames(TCollTest,['length'],['']);
+      J := ObjectToJSON(MyItem);
+      Check(J='{"Color":20,"Name":"ABC"}','remove field');
+      TJSONSerializer.RegisterCustomSerializerFieldNames(TCollTest,[],[]);
+      J := ObjectToJSON(MyItem);
+      Check(J='{"Color":20,"Length":10,"Name":"ABC"}');
+    finally
+      MyItem.Free;
+    end;
   finally
     C2.Free;
     Coll.Free;
   end;
-  // (custom) dynamic array serialization
-  TCollTstDynArrayTest;
-  TTextWriter.RegisterCustomJSONSerializer(TypeInfo(TFVs),
-    TCollTstDynArray.FVReader,TCollTstDynArray.FVWriter);
-  TCollTstDynArrayTest;
-  TTextWriter.RegisterCustomJSONSerializer(TypeInfo(TFVs),
-    TCollTstDynArray.FVReader2,TCollTstDynArray.FVWriter2);
-  TCollTstDynArrayTest;
-  // (custom) class serialization
-  TFileVersionTest(false);
-  TJSONSerializer.RegisterCustomSerializer(TFileVersion,
-    TCollTstDynArray.FVClassReader,TCollTstDynArray.FVClassWriter);
-  TFileVersionTest(true);
-  TJSONSerializer.RegisterCustomSerializer(TFileVersion,nil,nil);
-  TFileVersionTest(false);
 {$endif DELPHI5OROLDER}
 {$endif LVCL}
   // test TJSONRecordTextDefinition parsing
@@ -9034,6 +9248,7 @@ const
     ($94,$E4,$A9,$D9,$05,$31,$23,$1D,$BE,$D8,$7E,$D2,$E4,$F3,$5E,$4A,
      $0B,$F4,$B3,$BC,$CE,$EB,$17,$16,$D5,$77,$B1,$E0,$8B,$A9,$BA,$A3);
 var Digest: TSHA256Digest;
+    Digests: THash256DynArray;
 begin
   SingleTest('abc',D1);
   SingleTest('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq',D2);
@@ -9046,6 +9261,14 @@ begin
   PBKDF2_HMAC_SHA256('password','salt',2,Digest);
   check(SHA256DigestToString(Digest)=
    'ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43');
+  SetLength(Digests,2);
+  check(IsZero(Digests[0]));
+  check(IsZero(Digests[1]));
+  PBKDF2_HMAC_SHA256('password','salt',2,Digests);
+  check(IsEqual(Digests[0],Digest));
+  check(not IsEqual(Digests[1],Digest));
+  check(SHA256DigestToString(Digests[1])=
+    '830651afcb5c862f0b249bd031f7a67520d136470f5ec271ece91c07773253d9');
   PBKDF2_HMAC_SHA256('password','salt',4096,Digest);
   check(SHA256DigestToString(Digest)=
     'c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a');
@@ -9117,6 +9340,51 @@ begin
     end;
   check(PosEx(s1,split)=0);
 end;
+
+procedure TTestCryptographicRoutines.CryptData(dpapi: boolean);
+var i,size: integer;
+    plain,enc,test: RawByteString;
+    appsec: RawUTF8;
+    func: function(const Data,AppSecret: RawByteString; Encrypt: boolean): RawByteString;
+    tim: TPrecisionTimer;
+const MAX = 1000;
+begin
+  {$ifdef MSWINDOWS}
+  if dpapi then
+    func := CryptDataForCurrentUserDPAPI else
+  {$endif}
+    func := CryptDataForCurrentUser;
+  func('warmup','appsec',true);
+  size := 0;
+  tim.Start;
+  for i := 0 to MAX-1 do begin
+    plain := TAESPRNG.Main.FillRandom(i);
+    check(length(plain)=i);
+    UInt32ToUtf8(i,appsec);
+    enc := func(plain,appsec,true);
+    check((plain='') or (enc<>''));
+    check(length(enc)>=length(plain));
+    test := func(enc,appsec,false);
+    check(length(test)=i);
+    check(test=plain);
+    inc(size,i+length(enc));
+  end;
+  if dpapi then
+    NotifyTestSpeed('DPAPI',MAX*2,size,@tim) else
+    NotifyTestSpeed('AES-CFB',MAX*2,size,@tim);
+end;
+
+procedure TTestCryptographicRoutines._CryptDataForCurrentUser;
+begin
+  CryptData(false);
+end;
+
+{$ifdef MSWINDOWS}
+procedure TTestCryptographicRoutines._CryptDataForCurrentUserAPI;
+begin
+  CryptData(true);
+end;
+{$endif}
 
 {$ifndef NOVARIANTS}
 procedure TTestCryptographicRoutines._JWT;
@@ -9584,6 +9852,7 @@ begin
         check(length(U['RandomPublicKey'])=sizeof(TECCPublicKey)*2);
         check(U['Algorithm']=ShortStringToAnsi7String(ToText(ecaPBKDF2_HMAC_SHA256_AES256_CFB_SYNLZ)^));
         check(O['Signature']^.VarType=varNull,'not signed');
+        check(not B['Meta']);
       end;
       plainfn := 'plain-'+test;
       Exec(['file',crypt,'out',plainfn,'auth',priv,'authpass',pass,
@@ -9601,6 +9870,7 @@ begin
         check(U['Algorithm']='ecaPBKDF2_HMAC_SHA256_AES128_CTR');
         check(O['Signature']^.I['Version']=1,'signed');
         check(O['Signature']^.U['AuthoritySerial']=id);
+        check(B['Meta']);
       end;
       check(PosEx(StringFromFile(rawfn),StringFromFile(crypt))=sizeof(TECIESHeader)+1);
       DeleteFile(plainfn);
@@ -12906,7 +13176,7 @@ begin
       TestClientDist(TSQLRestClientURINamedPipe.Create(ModelC,'Test'));
       {$endif}
       // check custom properties content
-{$ifndef LVCL}
+      {$ifndef LVCL}
       if Client.TransactionBegin(TSQLRecordPeopleObject) then
       try
         V2.FillPrepare(Client,'LastName=:("Morse"):');
@@ -12932,14 +13202,14 @@ begin
       except
         Client.RollBack;
       end;
-{$endif}
+      {$endif}
       // test backup API
       BackupFN := Format('backupbackground%s.dbsynlz',[ClassName]);
       deleteFile(BackupFN);
       BackupTimer.Start;
       Check(Client.DB.BackupBackground(BackupFN,1024,0,OnBackupProgress,true));
       // test per-one and batch requests
-      if ClassType=TTestMemoryBased then begin // this is a bit time consuming, so do it once
+      if ClassType=TTestMemoryBased then begin // time consuming, so do it once
         Server := TSQLRestServerTest.Create(TSQLModel.Create([TSQLRecordPeople]),false);
         try
           Server.Model.Owner := Server; // we just use TSQLRecordPeople here
@@ -13856,7 +14126,7 @@ var s: RawUTF8;
 {$endif}
 begin
   Check(Inst.I.Add(1,2)=3);
-  Check(Inst.I.Multiply($1111333344445555,$2222666677778888)=$e26accccbf257d28);
+  Check(Inst.I.Multiply($1111333,$222266667)=$24693E8DB170B85);
   Check(Inst.I.StackIntMultiply(1,2,3,4,5,6,7,8,9,10)=3628800);
   Check(Inst.I.StackFloatMultiply(1,2,3,4,5,6,7,8,9,10)=3628800);
   CheckSame(Inst.I.Subtract(23,20),3);
@@ -13966,19 +14236,19 @@ begin
   end;
   n2 := Inst.CN.Imaginary;
   for c := 0 to Iterations shr 2 do begin
-    CheckSame(Inst.CN.Imaginary,n2);
+    CheckSame(Inst.CN.Imaginary,n2,1E-9);
     n1 := Random*1000;
     Inst.CN.Real := n1;
     CheckSame(Inst.CN.Real,n1);
-    CheckSame(Inst.CN.Imaginary,n2);
+    CheckSame(Inst.CN.Imaginary,n2,1E-9);
     n2 := Random*1000;
     Inst.CN.Imaginary := n2;
     CheckSame(Inst.CN.Real,n1);
-    CheckSame(Inst.CN.Imaginary,n2);
+    CheckSame(Inst.CN.Imaginary,n2,1E-9);
     Inst.CN.Add(1,2);
-    CheckSame(Inst.CN.Real,n1+1);
+    CheckSame(Inst.CN.Real,n1+1,1E-9);
     n2 := n2+2;
-    CheckSame(Inst.CN.Imaginary,n2);
+    CheckSame(Inst.CN.Imaginary,n2,1E-9);
   end;
   {$endif}
   Inst.CN.Assign(3.14,1.05946);
@@ -14996,7 +15266,7 @@ begin
   Check(I.Multiply(10,30)=60);
   Check(I.Multiply(2,35)=70);
   for n := 1 to 10000 do
-    CheckSame(I.Subtract(n*10.5,n*0.5),n*10);
+    CheckSame(I.Subtract(n*10.5,n*0.5),n*10,1E-9);
   n := Assertions;
   I := nil; // release TInterfaceMock -> will check all expectations
   n := Assertions-n;
@@ -15039,7 +15309,7 @@ begin
      Raises('Add',[1,2],ESynException,'expected exception');
   {$ifndef NOVARIANTS}
   for n := 1 to 10000 do
-    CheckSame(I.Subtract(n*10.5,n*0.5),n*10);
+    CheckSame(I.Subtract(n*10.5,n*0.5),n*10,1E-9);
   {$endif}
   Check(I.Subtract(10,20)=3,'Explicit result');
   {$WARN SYMBOL_PLATFORM OFF}
@@ -15304,22 +15574,12 @@ end;
 
 procedure TTestMultiThreadProcess.SocketAPI;
 begin
-  {$WARN SYMBOL_PLATFORM OFF}
-  {$ifndef FPC}
-  //if DebugHook=0 then
-  {$endif}
-    Test(TSQLHttpClientWinSock,useHttpSocket);
-  {$WARN SYMBOL_PLATFORM ON}
+  Test(TSQLHttpClientWinSock,useHttpSocket);
 end;
 
 procedure TTestMultiThreadProcess.Websockets;
 begin
-  {$WARN SYMBOL_PLATFORM OFF}
-  {$ifndef FPC}
-  //if DebugHook=0 then
-  {$endif}
-    Test(TSQLHttpClientWebsockets,useBidirSocket);
-  {$WARN SYMBOL_PLATFORM ON}
+  Test(TSQLHttpClientWebsockets,useBidirSocket);
 end;
 
 {$ifdef USELIBCURL}
@@ -16023,6 +16283,18 @@ end;
 
 {$endif DELPHI5OROLDER}
 
+{ TTestProtocols }
+
+procedure TTestProtocols.RTSPOverHTTP;
+var proxy: TRTSPOverHTTPServer;
+begin
+  proxy := TRTSPOverHTTPServer.Create('127.0.0.1','3999','3998',TSynLog,nil,nil);
+  try
+    proxy.RegressionTests(self,100,10);
+  finally
+    proxy.Free;
+  end;
+end;
 
 initialization
   _uE0 := WinAnsiToUtf8(@UTF8_E0_F4_BYTES[0],1);

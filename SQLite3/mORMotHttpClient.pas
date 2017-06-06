@@ -459,10 +459,18 @@ type
   /// HTTP/1.1 RESTful JSON deault mORMot Client class
   // -  maps the raw socket implementation class
   TSQLHttpClient = TSQLHttpClientWinSock;
+  {$ifdef USELIBCURL}
+  TSQLHttpsClient = TSQLHttpClientCurl;
+  {$else}
+  TSQLHttpsClient = TSQLHttpClientWinHTTP;
+  {$endif}
   {$else}
   /// HTTP/1.1 RESTful JSON default mORMot Client class
   // - under Windows, maps the TSQLHttpClientWinHTTP class
   TSQLHttpClient = TSQLHttpClientWinHTTP;
+  /// HTTP/HTTPS RESTful JSON default mORMot Client class
+  // - under Windows, maps the TSQLHttpClientWinHTTP class
+  TSQLHttpsClient = TSQLHttpClientWinHTTP;
   {$endif ONLYUSEHTTPSOCKET}
 
 var
@@ -627,7 +635,7 @@ end;
 function TSQLHttpClientWinSock.InternalCheckOpen: boolean;
 begin
   result := fSocket<>nil;
-  if result or (ioNoOpen in fInternalOpen) then
+  if result or (isDestroying in fInternalState) then
     exit;
   fSafe.Enter;
   try
@@ -692,7 +700,7 @@ end;
 function TSQLHttpClientWebsockets.InternalCheckOpen: boolean;
 begin
   result := WebSocketsConnected;
-  if result or (ioNoOpen in fInternalOpen) then
+  if result or (isDestroying in fInternalState) then
     exit; // already connected
   fSafe.Enter;
   try
@@ -864,7 +872,7 @@ end;
 function TSQLHttpClientRequest.InternalCheckOpen: boolean;
 begin
   result := fRequest<>nil;
-  if result or (ioNoOpen in fInternalOpen) then
+  if result or (isDestroying in fInternalState) then
     exit;
   fSafe.Enter;
   try

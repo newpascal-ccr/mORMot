@@ -12,6 +12,7 @@ Contributors
   AlexPirate
   Alfred Glaenzer (alf)
   Arnaud Bouchez
+  ASiwon
   Aweste
   Bas Schouten
   BigStar
@@ -30,6 +31,7 @@ Contributors
   Esteban Martin (EMartin)
   Eva Freimann (EVaF)
   Goran Despalatovic (gigo)
+  Jean-Baptiste Roussia (jbroussia)
   Joe (jokusoft)
   Johan Bontes
   Jordi Tudela
@@ -69,7 +71,7 @@ Contributors
 
   
 Synopse mORMot is an Open Source Client-Server ORM SOA MVC framework
-for Delphi 6 up to Delphi 10.1 Berlin and FPC, targeting Windows/Linux
+for Delphi 6 up to Delphi 10.2 Tokyo and FPC, targeting Windows/Linux
 for servers, and any platform for clients (including mobile or AJAX).
 
 The main features of mORMot are therefore:

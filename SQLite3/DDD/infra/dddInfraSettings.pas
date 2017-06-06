@@ -65,6 +65,7 @@ uses
   Classes,
   SynCommons,
   SynLog,
+  SynCrypto,
   mORMot,
   mORMotDDD,
   SynCrtSock,
@@ -198,7 +199,7 @@ type
       const Text: RawUTF8): boolean;
   public
     /// initialize the settings, with a corresponding storage process
-    constructor Create(aStorage: TDDDAppSettingsStorageAbstract); reintroduce;  
+    constructor Create(aStorage: TDDDAppSettingsStorageAbstract); reintroduce;
     /// persist if needed, and finalize the settings
     destructor Destroy; override;
     /// to be called when the application starts, to initialize settings
@@ -214,6 +215,23 @@ type
     // textual values, and 'stored false' properties would be included
     // - returns the new JSON content corresponding to the updated settings
     function AsJson: RawUTF8; virtual;
+    /// low-level method returning all TSynPersistentPassword full paths
+    // of all previously created TDDDAppSettingsStorageFile .settings
+    // - as settingsfile=class1@full.path.to.pass1,class2@full.path.to.pass2,...
+    // - you may use this method to create a 'passwords' resource for
+    // /HardenPasswords command line switch as implemented in dddInfraSettings.pas:
+    // ! passwords := SynLZCompress(TDDDAppSettingsAbstract.PasswordFields);
+    // ! FileFromString(passwords, 'passwords.data');
+    // then create e.g. a passwords.rc file as such:
+    // $ passwords 10 "passwords.data"
+    // compile this resource:
+    // $ brcc32 passwords.rc
+    // and link the resulting .res file to your daemon executable:
+    // ! {$R passwords.res}
+    // then /HardenPasswords and /PlainPasswords command line switchs will
+    // cypher/uncypher all TSynPersistentPassword protected fields using safe
+    // per-user CryptDataForCurrentUser() encryption
+    class function PasswordFields: RawUTF8;
     /// access to the associated settings storage
     property Storage: TDDDAppSettingsStorageAbstract read fStorage;
     /// transmitted as PROCID as part of any Log.SyslogServer message
@@ -225,7 +243,7 @@ type
     property Log: TDDDLogSettings read fLog;
   end;
 
-  /// class type used for storing application settings 
+  /// class type used for storing application settings
   TDDDAppSettingsAbstractClass = class of TDDDAppSettingsAbstract;
 
   /// class used for storing application settings as a JSON file
@@ -311,10 +329,13 @@ type
       aMongoDBOptions: TStaticMongoDBRegisterOptions=[mrDoNotRegisterUserGroupTables]): TSQLRest; virtual;
     /// returns the WrapperTemplateFolder property, all / chars replaced by \
     // - so that you would be able to store the paths with /, avoiding JSON escape
-    function WrapperTemplateFolderFixed: TFileName;
+    function WrapperTemplateFolderFixed(ReturnLocalIfNoneSet: boolean=false): TFileName;
     /// returns the WrapperSourceFolder property, all / chars replaced by \
     // - so that you would be able to store the paths with /, avoiding JSON escape
     function WrapperSourceFolderFixed: TFileName;
+    /// generate API documentation corresponding to REST SOA interfaces
+    procedure WrapperGenerate(Rest: TSQLRestServer; Port: integer;
+      const DestFile: TFileName; const Template: TFileName = 'API.adoc.mustache');
     /// the default folder where database files are to be stored
     // - will be used by NewRestInstance instead of the .exe folder, if set
     property DefaultDataFolder: TFileName read fDefaultDataFolder write fDefaultDataFolder;
@@ -406,6 +427,8 @@ type
     // - you can specify default Description and Service identifiers
     procedure Initialize(
       const aDescription,aServiceName,aServiceDisplayName,aAppUserModelID: string); reintroduce; virtual;
+    /// returns the folder containing .settings files - .exe folder by default
+    function SettingsFolder: TFileName; virtual;
   published
     /// define how this administrated service/daemon is accessed via REST
     property RemoteAdmin: TDDDAdministratedDaemonRemoteAdminSettings read FRemoteAdmin;
@@ -428,7 +451,7 @@ type
   /// a Factory event allowing to customize/mock a socket connection
   // - the supplied aOwner should be a TDDDSocketThread instance
   // - returns a IDDDSocket interface instance (e.g. a TDDDSynCrtSocket)
-  TOnIDDDSocketThreadCreate = procedure(aOwner: TObject; out Obj);
+  TOnIDDDSocketThreadCreate = procedure(aOwner: TObject; out Obj) of object;
 
   /// the settings of a TDDDThreadSocketProcess thread
   // - defines how to connect (and reconnect) to the associated TCP server
@@ -613,7 +636,7 @@ begin
     SQLite3Log.Family.EchoCustom := nil;
     {$endif}
     FreeAndNil(fSyslog);
-  end;   
+  end;
 end;
 
 function TDDDAppSettingsAbstract.AsJson: RawUTF8;
@@ -622,22 +645,72 @@ begin
     woHumanReadableFullSetsAsStar,woHumanReadableEnumSetAsComment]);
 end;
 
-constructor TDDDAppSettingsAbstract.Create(
-  aStorage: TDDDAppSettingsStorageAbstract);
-begin
-  inherited Create;
-  if aStorage=nil then
-    aStorage := TDDDAppSettingsStorageFile.Create;
-  fStorage := aStorage;
-  fStorage.SetOwner(self);
-end;
-
 procedure TDDDAppSettingsAbstract.StoreIfUpdated;
 begin
   if fStorage<>nil then
     fStorage.Store(AsJson);
 end;
 
+var
+  TDDDAppSettingsAbstractFiles: TRawUTF8List;
+
+constructor TDDDAppSettingsAbstract.Create(aStorage: TDDDAppSettingsStorageAbstract);
+begin
+  inherited Create;
+  if aStorage=nil then
+    aStorage := TDDDAppSettingsStorageFile.Create;
+  fStorage := aStorage;
+  fStorage.SetOwner(self);
+  if aStorage.InheritsFrom(TDDDAppSettingsStorageFile) then begin
+    if TDDDAppSettingsAbstractFiles=nil then
+      GarbageCollectorFreeAndNil(TDDDAppSettingsAbstractFiles,TRawUTF8List.Create);
+    TDDDAppSettingsAbstractFiles.AddObject(StringToUTF8(ExtractFileName(
+      TDDDAppSettingsStorageFile(aStorage).fSettingsJsonFileName)),pointer(ClassType));
+  end;
+end;
+
+class function TDDDAppSettingsAbstract.PasswordFields: RawUTF8;
+  procedure InternalAdd(const path: RawUTF8; C: TClass; var res: TRawUTF8DynArray);
+  var PI,PP: PPropInfo;
+      CT: TClass;
+      p: RawUTF8;
+      i: integer;
+      offset: pointer;
+  begin
+    offset := TSynPersistentWithPassword(nil).GetPasswordFieldAddress;
+    while C<>nil do begin
+      for i := 1 to InternalClassPropInfo(C,PI) do begin
+        if PI^.PropType^.Kind=tkClass then begin
+          FormatUTF8('%%.',[path,PI^.Name],p);
+          CT := PI^.PropType^.ClassType^.ClassType;
+          if CT.InheritsFrom(TSynPersistentWithPassword) then begin
+            PP := ClassFieldPropWithParentsFromClassOffset(CT,offset);
+            if PP<>nil then
+              AddRawUTF8(res,FormatUTF8('%@%%', [ClassNameShort(CT)^, p, PP^.Name]));
+          end;
+          InternalAdd(p,CT,res); // recursive search of all password fields
+        end;
+        PI := PI^.Next;
+      end;
+      C := C.ClassParent;
+    end;
+  end;
+var i: integer;
+    fn: RawUTF8;
+    res: TRawUTF8DynArray;
+    cl: TDDDAppSettingsAbstractClass;
+begin
+  result := '';
+  if TDDDAppSettingsAbstractFiles<>nil then
+    for i := 0 to TDDDAppSettingsAbstractFiles.Count-1 do begin
+      fn := Split(TDDDAppSettingsAbstractFiles.Strings[i],'.');
+      cl := pointer(TDDDAppSettingsAbstractFiles.Objects[i]);
+      res := nil;
+      InternalAdd('',cl,res);
+      if res<>nil then
+        result := FormatUTF8('%%=%'#13#10,[result,fn,RawUTF8ArrayToCSV(res)]);
+    end;
+end;
 
 
 { TDDDLogSettings }
@@ -651,7 +724,7 @@ begin
   fRotateFileSize := 128*1024; // 128 MB per rotation log by default
   fAutoFlush := 5;
   fSyslogLevels := [sllWarning,sllLastError,sllError,
-    sllException,sllExceptionOS,sllDDDError];
+    sllException,sllExceptionOS,sllNewRun,sllDDDError];
   fSyslogFacility := sfLocal0;
 end;
 
@@ -751,24 +824,43 @@ begin
   end;
 end;
 
+procedure TDDDRestSettings.WrapperGenerate(Rest: TSQLRestServer; Port: integer;
+  const DestFile, Template: TFileName);
+var dest: TFileName;
+    mus: RawUTF8;
+begin
+  if (self = nil) or (Rest = nil) then
+    exit;
+  if DestFile = '' then
+    dest := ExeVersion.ProgramFilePath+'mORMotClient.asc' else
+    dest := DestFile;
+  mus := StringFromFile(WrapperTemplateFolderFixed(true)+Template);
+  FileFromString(WrapperFromModel(Rest,mus,'',Port),dest);
+end;
+
 function TDDDRestSettings.WrapperSourceFolderFixed: TFileName;
 begin
   if fWrapperSourceFolders='' then
     result := '' else begin
     if fWrapperSourceFolderFixed='' then
-      fWrapperSourceFolderFixed := StringReplace(fWrapperSourceFolders,'/','\',[rfReplaceAll]);
+      fWrapperSourceFolderFixed := IncludeTrailingPathDelimiter(StringReplace(
+        fWrapperSourceFolders,'/',PathDelim,[rfReplaceAll]));
     result := fWrapperSourceFolders;
   end;
 end;
 
-function TDDDRestSettings.WrapperTemplateFolderFixed: TFileName;
+function TDDDRestSettings.WrapperTemplateFolderFixed(ReturnLocalIfNoneSet: boolean): TFileName;
 begin
   if fWrapperTemplateFolder='' then
-    result := '' else begin
-    if fWrapperTemplateFolderFixed='' then
-      fWrapperTemplateFolderFixed := StringReplace(fWrapperTemplateFolder,'/','\',[rfReplaceAll]);
-    result := fWrapperTemplateFolder;
-  end;
+    if ReturnLocalIfNoneSet then
+      result := ExeVersion.ProgramFilePath
+    else
+      result := '' else begin
+      if fWrapperTemplateFolderFixed='' then
+        fWrapperTemplateFolderFixed := StringReplace(
+          fWrapperTemplateFolder,'/',PathDelim,[rfReplaceAll]);
+      result := fWrapperTemplateFolder;
+    end;
 end;
 
 
@@ -795,6 +887,14 @@ begin
     FServiceDisplayName := aServiceDisplayName;
   if FAppUserModelID='' then
     FAppUserModelID := aAppUserModelID;
+end;
+
+function TDDDAdministratedDaemonSettings.SettingsFolder: TFileName;
+begin
+  if fStorage.InheritsFrom(TDDDAppSettingsStorageFile) then
+    result := ExtractFilePath(TDDDAppSettingsStorageFile(fStorage).fSettingsJsonFileName)
+  else
+    result := ExeVersion.ProgramFilePath;
 end;
 
 
@@ -943,5 +1043,8 @@ begin
   inherited Create;
   fSMTP := SMTP_DEFAULT;
 end;
+
+initialization
+  TSynPersistentWithPasswordUserCrypt := CryptDataForCurrentUser;
 
 end.

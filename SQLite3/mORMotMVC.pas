@@ -82,10 +82,9 @@ uses
   mORMot,
   mORMotWrappers;
 
+{ ====== Views ====== }
+
 type
-
-  { ====== Views ====== }
-
   /// define a particular rendered View
   // - as rendered by TMVCViewsAbtract.Render() method
   TMVCView = record
@@ -211,8 +210,9 @@ type
   end;
 
 
-  { ====== Sessions ====== }
+{ ====== Sessions ====== }
 
+type
   /// an abstract class able to implement ViewModel/Controller sessions
   // - see TMVCSessionWithCookies to implement cookie-based sessions
   // - this kind of ViewModel will implement client side storage of sessions,
@@ -268,8 +268,10 @@ type
     SessionCount: integer;
     /// secret information, used for HMAC digital signature of cookie content
     Secret: THMAC_CRC32C;
+    /// random IV used as CTR on Crypt[] secret key
+    CryptNonce: Cardinal;
     /// secret information, used for encryption of the cookie content
-    Crypt: array[0..63] of cardinal;
+    Crypt: array[byte] of byte;
   end;
 
   /// a class able to implement ViewModel/Controller sessions with cookies
@@ -280,21 +282,22 @@ type
   // from JavaScript): they are digitally signed (with HMAC-CRC32C and a
   // temporary secret key), they include an unique session identifier (like
   // "jti" claim), issue and expiration dates (like "iat" and "exp" claims),
-  // and they are encrypted with a temporary key- all secret keys are tied to
+  // and they are encrypted with a temporary key - this secret keys is tied to
   // the TMVCSessionWithCookies instance lifetime, so new cookies are generated
   // after server restart, unless they are persisted via LoadContext/SaveContext
+  // - signature and encryption are weak, but very fast, to avoid DDOS attacks
   TMVCSessionWithCookies = class(TMVCSessionAbstract)
   protected
     fContext: TMVCSessionWithCookiesContext;
     function GetCookie: RawUTF8; virtual; abstract;
     procedure SetCookie(const cookie: RawUTF8); virtual; abstract;
-    procedure Crypt(P: PCardinalArray; bytes: integer);
+    procedure Crypt(P: PByteArray; bytes: integer);
   public
     /// create an instance of this ViewModel implementation class
     constructor Create; override;
     /// will initialize the session cookie
     // - setting an optional record data, which will be stored Base64-encoded
-    // - will return the internal session ID
+    // - will return the 32-bit internal session ID
     // - you can supply a time period, after which the session will expire -
     // default is 1 hour
     function Initialize(PRecordData: pointer=nil; PRecordTypeInfo: pointer=nil;
@@ -303,6 +306,7 @@ type
     function Exists: boolean; override;
     /// retrieve the session ID from the current cookie
     // - can optionally retrieve the record Data parameter stored in the cookie
+    // - will return the 32-bit internal session ID, or 0 if the cookie is invalid
     function CheckAndRetrieve(PRecordData: pointer=nil; PRecordTypeInfo: pointer=nil): integer; override;
     /// clear the session
     // - by deleting the cookie on the client side
@@ -315,7 +319,7 @@ type
     // - WARNING: if the unerlying record type structure changed (i.e. any
     // field is modified or added), restoration will lead to data corruption of
     // low-level binary content, then trigger unexpected GPF: if you change the
-    // record type defition, do NOT use LoadContext - and reset all cookies
+    // record type definition, do NOT use LoadContext - and reset all cookies
     function LoadContext(const Saved: RawUTF8): boolean; override;
     /// direct access to the low-level information used for cookies generation
     // - use SaveContext and LoadContext methods to persist this information
@@ -916,7 +920,7 @@ begin
           continue;
         if not (Field.SQLFieldType in [sftAnsiText,sftUTF8Text,sftInteger,
            sftFloat,sftCurrency,sftTimeLog,sftModTime,sftCreateTime,sftDateTime,
-           sftDateTimeMS,sftUnixTime,sftBoolean,sftEnumerate,sftSet]) then
+           sftDateTimeMS,sftUnixTime,sftUnixMSTime,sftBoolean,sftEnumerate,sftSet]) then
           continue;
         HtmlTableStyle.BeforeFieldName(W);
         GetCaptionFromPCharLen(TrimLeftLowerCase(Field.Name),caption);
@@ -933,9 +937,11 @@ begin
           timelog.From(utf8);
           W.AddHtmlEscapeString(timeLog.i18nText);
         end;
-        sftUnixTime:
+        sftUnixTime, sftUnixMSTime:
           if VariantToInt64(Rec^.Values[i],timelog.Value) then begin
-            timelog.FromUnixTime(timelog.Value);
+            if Field.SQLFieldType=sftUnixTime then
+              timelog.FromUnixTime(timelog.Value) else
+              timelog.FromUnixMSTime(timelog.Value);
             W.AddHtmlEscapeString(timeLog.i18nText);
           end;
         sftBoolean,sftEnumerate:
@@ -1186,16 +1192,45 @@ var rnd: TByte64;
 begin
   inherited Create;
   fContext.CookieName := 'mORMot';
-  TAESPRNG.Main.FillRandom(@fContext.Crypt,sizeof(fContext.Crypt)); // temporary encryption
+  // temporary secret for encryption
+  fContext.CryptNonce := Random32;
+  TAESPRNG.Main.FillRandom(@fContext.Crypt,sizeof(fContext.Crypt));
+  // temporary secret for HMAC-CRC32C
   TAESPRNG.Main.FillRandom(@rnd,sizeof(rnd));
-  fContext.Secret.Init(@rnd,sizeof(rnd)); // temporary secret for HMAC-CRC32C
+  fContext.Secret.Init(@rnd,sizeof(rnd));
 end;
 
-procedure TMVCSessionWithCookies.Crypt(P: PCardinalArray; bytes: integer);
-var i: integer;
+procedure XorMemoryCTR(Data,Key: PByteArray; size: integer; var ctr: cardinal);
 begin
-  for i := 0 to bytes shr 2 do
-    P[i] := P[i] xor fContext.Crypt[i and pred(sizeof(fContext.Crypt))];
+  while size>=sizeof(Cardinal) do begin
+    dec(size,sizeof(Cardinal));
+    PCardinal(Data)^ := PCardinal(Data)^ xor PCardinal(Key)^ xor ctr;
+    inc(PCardinal(Data));
+    inc(PCardinal(Key));
+    inc(ctr);
+  end;
+  if size=0 then
+    exit; // no padding
+  repeat
+    dec(size);
+    Data[size] := Data[size] xor Key[size] xor PByteArray(@ctr)^[size];
+  until size=0;
+  inc(ctr);
+end;
+
+procedure TMVCSessionWithCookies.Crypt(P: PByteArray; bytes: integer);
+var chunk: integer;
+    ctr: cardinal;
+begin
+  ctr := fContext.CryptNonce;
+  while bytes>0 do begin
+    if bytes>sizeof(fContext.Crypt) then // encrypt by 256 bytes chunks
+      chunk := sizeof(fContext.Crypt) else
+      chunk := bytes;
+    XorMemoryCTR(P,@fContext.Crypt,chunk,ctr);
+    inc(PByte(P),chunk);
+    dec(bytes,chunk);
+  end;
 end;
 
 function TMVCSessionWithCookies.Exists: boolean;
@@ -1228,7 +1263,7 @@ begin
     exit;
   Base64FromURI(cookie);
   len := Base64ToBinLengthSafe(pointer(cookie),length(cookie));
-  if len>=sizeof(tmp.head) then begin
+  if (len>=sizeof(tmp.head)) and (len<=sizeof(tmp)) then begin
     Base64Decode(pointer(cookie),@tmp,length(cookie) shr 2);
     Crypt(@tmp,len);
     now := UnixTimeUTC;

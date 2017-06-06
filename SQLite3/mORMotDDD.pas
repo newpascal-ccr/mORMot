@@ -1053,9 +1053,12 @@ implementation
 
 { *********** Persistence / Repository Interfaces }
 
+var
+  TCQRSResultText: array[TCQRSResult] of PShortString;
+
 function ToText(res: TCQRSResult): PShortString;
 begin
-  result := GetEnumName(TypeInfo(TCQRSResult),ord(res));
+  result := TCQRSResultText[res];
 end;
 
 function ToText(res: TCQRSQueryState): PShortString; overload;
@@ -1349,10 +1352,11 @@ const RAW_TYPE: array[TSQLFieldType] of RawUTF8 = (
     'TRecordVersion',  // sftRecordVersion = TRecordVersion
     'TSessionUserID',  // sftSessionUserID
     '',                // sftDateTimeMS
-    '');               // sftUnixTime
+    '',                // sftUnixTime
+    '');               // sftUnixMSTime
 var hier: TClassDynArray;
     a,i,f: integer;
-    code,aggname,recname,parentrecname: RawUTF8;
+    code,aggname,recname,parentrecname,typ: RawUTF8;
     map: TSQLPropInfoList;
     rectypes: TRawUTF8DynArray;
 begin
@@ -1392,10 +1396,15 @@ begin
         end;
         code := code+'  published'#13#10;
         for f := 0 to map.Count-1 do
-        with map.List[f] do
-          code := FormatUTF8('%    /// maps %.%'#13#10+
-            '    property %: % read f% write f%;'#13#10,
-            [code,aggname,NameUnflattened,Name,rectypes[f],Name,Name]);
+        with map.List[f] do begin
+          typ := SQLFieldRTTITypeName;
+          if IdemPropNameU(typ, rectypes[f]) then
+            typ := '' else
+            typ := ' ('+typ+')';
+          code := FormatUTF8('%    /// maps %.%%'#13#10+
+            '    property %: % read f% write f%;'#13#10, [code,aggname,
+            NameUnflattened,typ,Name,rectypes[f],Name,Name]);
+        end;
         code := code+'  end;'#13#10;
       finally
         map.Free;
@@ -2787,7 +2796,7 @@ initialization
   TTextWriter.RegisterCustomJSONSerializerFromTextSimpleType(TypeInfo(TDDDAdministratedDaemonStatus));
   {$endif}
   {$endif}
-
+  GetEnumNames(TypeInfo(TCQRSResult), @TCQRSResultText);
   TInterfaceFactory.RegisterInterfaces([
     TypeInfo(IMonitored),TypeInfo(IMonitoredDaemon),
     TypeInfo(IAdministratedDaemon),TypeInfo(IAdministratedDaemonAsProxy)]);

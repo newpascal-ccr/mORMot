@@ -185,7 +185,7 @@ interface
   - not defined by default - should be set globally to the project conditionals,
   to be defined in both mORMotHttpClient and mORMotHttpServer units }
 
-{$I Synopse.inc} // define HASINLINE WITHLOG USETHREADPOOL ONLYUSEHTTPSOCKET
+{$I Synopse.inc} // define HASINLINE WITHLOG ONLYUSEHTTPSOCKET
 
 
 uses
@@ -276,6 +276,7 @@ type
   TSQLHttpServer = class
   protected
     fOnlyJSONRequests: boolean;
+    fShutdownInProgress: boolean;
     fHttpServer: THttpServerGeneric;
     fPort, fDomainName: AnsiString;
     fPublicAddress, fPublicPort: RawUTF8;
@@ -376,16 +377,18 @@ type
     // transmission definition; other parameters would be the standard one
     // - only the supplied aDefinition.Authentication will be defined
     // - under Windows, will use http.sys with automatic URI registration, unless
-    // aDefinition.WebSocketPassword is set, and then binary WebSockets would
-    // be expected with the corresponding encryption
-    constructor Create(aServer: TSQLRestServer; aDefinition: TSQLHttpServerDefinition); reintroduce; overload;
+    // aDefinition.WebSocketPassword is set (and then binary WebSockets would be
+    // expected with the corresponding encryption), or aForcedKind is overriden
+    constructor Create(aServer: TSQLRestServer; aDefinition: TSQLHttpServerDefinition;
+      aForcedKind: TSQLHttpServerOptions=HTTP_DEFAULT_MODE); reintroduce; overload;
     /// release all memory, internal mORMot server and HTTP handlers
     destructor Destroy; override;
     /// you can call this method to prepare the HTTP server for shutting down
-    // - it will call all associated TSQLRestServer.Shutdown methods
+    // - it will call all associated TSQLRestServer.Shutdown methods, unless
+    // noRestServerShutdown is true
     // - note that Destroy won't call this method on its own, since the
     // TSQLRestServer instances may have a life-time uncoupled from HTTP process
-    procedure Shutdown;
+    procedure Shutdown(noRestServerShutdown: boolean=false);
     /// try to register another TSQLRestServer instance to the HTTP server
     // - each TSQLRestServer class must have an unique Model.Root value, to
     // identify which instance must handle a particular request from its URI
@@ -720,9 +723,8 @@ begin
     if aHttpServerKind=useBidirSocket then
       fHttpServer := TWebSocketServerRest.Create(
         fPort,HttpThreadStart,HttpThreadTerminate,GetDBServerNames) else
-      fHttpServer := THttpServer.Create(
-        fPort,HttpThreadStart,HttpThreadTerminate,GetDBServerNames
-        {$ifdef USETHREADPOOL},ServerThreadPoolCount{$endif});
+      fHttpServer := THttpServer.Create(fPort,HttpThreadStart,HttpThreadTerminate,
+        GetDBServerNames,ServerThreadPoolCount);
     {$ifdef USETCPPREFIX}
     THttpServer(fHttpServer).TCPPrefix := 'magic';
     {$endif}
@@ -762,24 +764,29 @@ begin
 end;
 
 destructor TSQLHttpServer.Destroy;
-var i: integer;
 begin
   fLog.Enter(self);
-  fLog.Add.Log(sllHttp,'% finalized for % server%',
-    [fHttpServer,length(fDBServers),PLURAL_FORM[length(fDBServers)>1]],self);
-  for i := 0 to high(fDBServers) do
-    if TMethod(fDBServers[i].Server.OnNotifyCallback).Data=self then
-      fDBServers[i].Server.OnNotifyCallback := nil; // avoid unexpected GPF
+  fLog.Add.Log(sllHttp,'% finalized for %',[fHttpServer,
+    Plural('server',length(fDBServers))],self);
+  Shutdown(true); // but don't call fDBServers[i].Server.Shutdown
   FreeAndNil(fHttpServer);
   inherited Destroy;
 end;
 
-procedure TSQLHttpServer.Shutdown;
+procedure TSQLHttpServer.Shutdown(noRestServerShutdown: boolean);
 var i: integer;
 begin
-  if self<>nil then
-    for i := 0 to high(fDBServers) do
-      fDBServers[i].Server.Shutdown;
+  if (self<>nil) and not fShutdownInProgress then begin
+    fLog.Enter('Shutdown(%)',[BOOL_STR[noRestServerShutdown]],self);
+    fShutdownInProgress := true;
+    fHttpServer.Shutdown;
+    for i := 0 to high(fDBServers) do begin
+      if not noRestServerShutdown then
+        fDBServers[i].Server.Shutdown;
+      if TMethod(fDBServers[i].Server.OnNotifyCallback).Data=self then
+        fDBServers[i].Server.OnNotifyCallback := nil; // avoid unexpected GPF
+    end;
+  end;
 end;
 
 function TSQLHttpServer.GetDBServer(Index: Integer): TSQLRestServer;
@@ -880,6 +887,8 @@ var call: TSQLRestURIParams;
     hostroot,redirect: RawUTF8;
     match: TSQLRestModelMatch;
 begin
+  if (self=nil) or fShutdownInProgress then
+    result := HTTP_NOTFOUND else
   if ((Ctxt.URL='') or (Ctxt.URL='/')) and (Ctxt.Method='GET') then
     if fRootRedirectToURI[Ctxt.UseSSL]<>'' then begin
       Ctxt.OutCustomHeaders := 'Location: '+fRootRedirectToURI[Ctxt.UseSSL];
@@ -1034,7 +1043,7 @@ begin
     result.WebSocketsEnable(aWebSocketsURI,aWebSocketsEncryptionKey,
       aWebSocketsAJAX,aWebSocketsCompressed);
   end else
-    raise ESynBidirSocket.CreateUTF8(
+    raise EWebSockets.CreateUTF8(
       '%.WebSocketEnable(%): expected useBidirSocket',
       [self,GetEnumName(TypeInfo(TSQLHttpServerOptions),ord(fHttpServerKind))^]);
 end;
@@ -1044,7 +1053,7 @@ function TSQLHttpServer.WebSocketsEnable(aServer: TSQLRestServer;
   aWebSocketsAJAX,aWebSocketsCompressed: boolean): TWebSocketServerRest;
 begin
   if (aServer=nil) or (DBServerFind(aServer)<0) then
-    raise ESynBidirSocket.CreateUTF8('%.WebSocketEnable(aServer=%?)',[self,aServer]);
+    raise EWebSockets.CreateUTF8('%.WebSocketEnable(aServer=%?)',[self,aServer]);
   result := WebSocketsEnable(aServer.Model.Root,
     aWebSocketsEncryptionKey,aWebSocketsAJAX,aWebSocketsCompressed);
 end;
@@ -1056,7 +1065,7 @@ var ctxt: THttpServerRequest;
     status: cardinal;
 begin
   result := false;
-  if self<>nil then
+  if (self<>nil) and not fShutdownInProgress then
   try
     if fHttpServer<>nil then begin
       // aConnection.InheritsFrom(TSynThread) may raise an exception
@@ -1088,26 +1097,24 @@ begin
 end;
 
 constructor TSQLHttpServer.Create(aServer: TSQLRestServer;
-  aDefinition: TSQLHttpServerDefinition);
+  aDefinition: TSQLHttpServerDefinition; aForcedKind: TSQLHttpServerOptions);
 const AUTH: array[TSQLHttpServerRestAuthentication] of TSQLRestServerAuthenticationClass = (
   // adDefault, adHttpBasic, adWeak, adSSPI
   TSQLRestServerAuthenticationDefault, TSQLRestServerAuthenticationHttpBasic,
   TSQLRestServerAuthenticationNone,
   {$ifdef MSWINDOWS}TSQLRestServerAuthenticationSSPI{$else}nil{$endif});
 var a: TSQLHttpServerRestAuthentication;
-    kind: TSQLHttpServerOptions;
     thrdCnt: integer;
     websock: TWebSocketServerRest;
 begin
   if aDefinition=nil then
     raise EHttpServerException.CreateUTF8('%.Create(aDefinition=nil)',[self]);
-  if aDefinition.WebSocketPassword='' then
-    kind := HTTP_DEFAULT_MODE else
-    kind := useBidirSocket;
+  if aDefinition.WebSocketPassword<>'' then
+    aForcedKind := useBidirSocket;
   if aDefinition.ThreadCount=0 then
     thrdCnt := 32 else
     thrdCnt := aDefinition.ThreadCount;
-  Create(aDefinition.BindPort,aServer,'+',kind,nil,thrdCnt,
+  Create(aDefinition.BindPort,aServer,'+',aForcedKind,nil,thrdCnt,
     HTTPS_SECURITY[aDefinition.Https],'',aDefinition.HttpSysQueueName);
   if aDefinition.EnableCORS then
     AccessControlAllowOrigin := '*';

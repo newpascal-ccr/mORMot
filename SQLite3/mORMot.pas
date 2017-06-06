@@ -38,6 +38,7 @@ unit mORMot;
     Esmond
     Goran Despalatovic (gigo)
     Jordi Tudela
+    Jean-Baptiste Roussia (jbroussia)
     Maciej Izak (hnb)
     Martin Suer
     MilesYou
@@ -1046,8 +1047,8 @@ unit mORMot;
       to allow numerical or date/time format for a given column [749dfbdb6a]
     - added optional CustomCompare: TUTF8Compare param to TSQLTable.SortFields()
       to allow any kind of custom ordering - feature request [c6804d48a4]
-    - speed up of TSQLTable.FieldIndex() TSQLTable.FieldIndexExisting() methods
-      (using binary search)
+    - speed up of TSQLTable.FieldIndex() TSQLTable.FieldIndexExisting() methods,
+      using O(log(n)) binary search
     - added overloaded TSQLTable.FieldIndex() and TSQLTable.FieldIndexExisting()
       methods, to set several local field index integer variables at once
     - added TSQLTable.ToObjectList() and ToObjectList<T: TSQLRecord>() methods
@@ -1259,7 +1260,7 @@ uses
   {$endif}
 {$endif}
 {$ifndef LVCL}
-  SyncObjs, // for TEvent and TCriticalSection
+  SyncObjs, // for TEvent
   Contnrs,  // for TObjectList
   {$ifndef NOVARIANTS}
   Variants,
@@ -1438,11 +1439,11 @@ type
   // displayed as an integer by default, sets with an enumeration type with
   // up to 64 elements is allowed yet (stored as an Int64)
   // - sftInteger is an INTEGER (Int64 precision, as expected by SQLite3) field
-  // - sftID is an INTEGER field pointing to the ID/ROWID of another record of
+  // - sftID is an INTEGER field pointing to the ID/RowID of another record of
   // a table, defined by the class type of the TSQLRecord inherited property;
   // coherency is always ensured: after a delete, all values pointing to
   // it is reset to 0
-  // - sftRecord is an INTEGER field pointing to the ID/ROWID of another
+  // - sftRecord is an INTEGER field pointing to the ID/RowID of another
   // record: TRecordReference=Int64 Delphi property which can be typecasted to
   // RecordRef; coherency is always ensured: after a delete, all values
   // pointing to it are reset to 0 by the ORM
@@ -1542,9 +1543,12 @@ type
   // statements (like 'UPDATE Table SET Column=0') won't change its content;
   // this is automated on Delphi client side, so only within TSQLRecord ORM use
   // (a pure AJAX application should fill such fields explicitely before sending)
-  // - sftUnixTime is an INTEGER field for coding a date and time  as second-based
+  // - sftUnixTime is an INTEGER field for coding a date and time as second-based
   // Unix Time (SQLite3 compatible), which should be defined as TUnixTime=Int64
-  // Delphi property
+  // TSQLRecord property
+  // - sftUnixMSTime is an INTEGER field for coding a date and time as
+  // millisecond-based Unix Time (JavaScript compatible), which should be
+  // defined as TUnixMSTime=Int64 TSQLRecord property
   // - WARNING: do not change the order of items below, otherwise some methods
   // (like TSQLRecordProperties.CheckBinaryHeader) may be broken and fail
   TSQLFieldType = (
@@ -1577,7 +1581,8 @@ type
     sftRecordVersion,
     sftSessionUserID,
     sftDateTimeMS,
-    sftUnixTime);
+    sftUnixTime,
+    sftUnixMSTime);
 
   /// set of available SQL field property types
   TSQLFieldTypes = set of TSQLFieldType;
@@ -1589,6 +1594,7 @@ type
   // - FieldCount is 0 if was never sorted
   // - used to sort data again after a successfull data update with TSQLTableJSON.FillFrom()
   TSQLTableSortParams = record
+    Comp: TUTF8Compare;
     FieldCount, FieldIndex: integer;
     FieldType: TSQLFieldType;
     Asc: boolean;
@@ -1892,7 +1898,12 @@ function NullableUTF8TextToValue(const V: TNullableUTF8Text): RawUTF8;
 /// similar to AddInt64() function, but for a TIDDynArray
 // - some random GPF were identified with AddInt64(TInt64DynArray(Values),...)
 // with the Delphi Win64 compiler
-procedure AddID(var Values: TIDDynArray; var ValuesCount: integer; Value: TID);
+procedure AddID(var Values: TIDDynArray; var ValuesCount: integer; Value: TID); overload;
+
+/// similar to AddInt64() function, but for a TIDDynArray
+// - some random GPF were identified with AddInt64(TInt64DynArray(Values),...)
+// with the Delphi Win64 compiler
+procedure AddID(var Values: TIDDynArray; Value: TID); overload;
 
 type
   /// the available options for TSQLRest.BatchStart() process
@@ -1999,12 +2010,12 @@ type
 /// set the TID (=64 bits integer) value from the numerical text stored in P^
 // - just a redirection to SynCommons.SetInt64()
 procedure SetID(P: PUTF8Char; var result: TID); overload;
-  {$ifdef HASINLINE}inline;{$endif}
+  {$ifdef HASINLINENOTX86}inline;{$endif}
 
 /// set the TID (=64 bits integer) value from the numerical text stored in U
 // - just a redirection to SynCommons.SetInt64()
 procedure SetID(const U: RawByteString; var result: TID); overload;
-  {$ifdef HASINLINE}inline;{$endif}
+  {$ifdef HASINLINENOTX86}inline;{$endif}
 
 /// decode JSON fields object into an UTF-8 encoded SQL-ready statement
 // - this function decodes in the P^ buffer memory itself (no memory allocation
@@ -2109,6 +2120,17 @@ function SQLFromWhere(const Where: RawUTF8): RawUTF8;
 // ORDER/GROUP/LIMIT/OFFSET/JOIN keywords
 function SQLWhereIsEndClause(const Where: RawUTF8): boolean;
 
+/// compute 'PropName in (...)' where clause for a SQL statement
+// - if Values has no value, returns ''
+// - if Values has a single value, returns 'PropName="Values0"' or inlined
+// 'PropName=:("Values0"):' if ValuesInlined is true
+// - if Values has more than one value, returns 'PropName in ("Values0","Values1",...)'
+// or 'PropName in (:("Values0"):,:("Values1"):,...)' if ValuesInlined is true
+// - PropName can be used as a prefix to the 'in ()' clause, in conjunction
+// with optional Suffix value
+function SelectInClause(const PropName: RawUTF8; const Values: array of RawUTF8;
+  const Suffix: RawUTF8=''; ValuesInlined: boolean=false): RawUTF8;
+
 /// naive search of '... FROM TableName ...' pattern in the supplied SQL
 function GetTableNameFromSQLSelect(const SQL: RawUTF8;
   EnsureUniqueTableInFrom: boolean): RawUTF8;
@@ -2127,7 +2149,7 @@ function GetTableNamesFromSQLSelect(const SQL: RawUTF8): TRawUTF8DynArray;
 // - sftInteger is returned for any INTEGER stored value, even if it was declared
 // as sftEnumerate, sftSet, sftID, sftTID, sftRecord, sftRecordVersion,
 // sftSessionUserID, sftBoolean, sftModTime/sftCreateTime/sftTimeLog or
-// sftUnixTime type
+// sftUnixTime/sftUnixMSTime type
 function UTF8ContentType(P: PUTF8Char): TSQLFieldType;
 
 /// guess the number type of an UTF-8 encoded field value, as used in TSQLTable.Get()
@@ -2325,7 +2347,7 @@ const
 // will point in From at the syntax error place (e.g. on any unknown property name)
 // - caller should explicitely perform a SetDefaultValuesObject(Value) if
 // the default values are expected to be set before JSON parsing
-function JSONToObject(var ObjectInstance; From: PUTF8Char; var Valid: boolean;
+function JSONToObject(var ObjectInstance; From: PUTF8Char; out Valid: boolean;
   TObjectListItemClass: TClass=nil; Options: TJSONToObjectOptions=[]): PUTF8Char;
 
 /// read an object properties, as saved by ObjectToJSON function
@@ -2394,6 +2416,8 @@ type
     procedure Init(C: TClass);
     /// create a new instance of the registered class
     function CreateNew: TObject;
+    /// compute the custom JSON commentary corresponding to this class
+    procedure SetCustomComment(var CustomComment: RawUTF8);
   end;
   /// points to information about a class, able to create new instances
   PClassInstance = ^TClassInstance;
@@ -2460,8 +2484,6 @@ type
   PFloatType = ^TFloatType;
 
   PTypeInfoDynArray = array of PTypeInfo;
-
-  TClassDynArray = array of TClass;
 
 {$ifdef FPC}
 {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
@@ -2731,7 +2753,7 @@ type
     /// the declared name of the type ('String','Word','RawUnicode'...)
     Name: ShortString;
     /// get the class type information
-    function ClassType: PClassType; {$ifdef HASINLINE}inline;{$endif}
+    function ClassType: PClassType; {$ifdef HASINLINENOTX86}inline;{$endif}
     /// create an instance of the corresponding class
     // - will call TObject.Create, or TSQLRecord.Create virtual constructor
     // - will raise EParsingException if class cannot be constructed on the fly,
@@ -2756,14 +2778,14 @@ type
     /// fast and easy find if a class type inherits from a specific class type
     function InheritsFrom(AClass: TClass): boolean;
     /// get the enumeration type information
-    function EnumBaseType: PEnumType; {$ifdef HASINLINE}inline;{$endif}
+    function EnumBaseType: PEnumType; {$ifdef HASINLINENOTX86}inline;{$endif}
     /// get the record type information
-    function RecordType: PRecordType; {$ifdef HASINLINE}inline;{$endif}
+    function RecordType: PRecordType; {$ifdef HASINLINENOTX86}inline;{$endif}
     /// get the dynamic array type information of the stored item
     function DynArrayItemType(aDataSize: PInteger=nil): PTypeInfo;
       {$ifdef HASINLINE}inline;{$endif}
     /// get the dynamic array size (in bytes) of the stored item
-    function DynArrayItemSize: integer; {$ifdef HASINLINE}inline;{$endif}
+    function DynArrayItemSize: integer; {$ifdef HASINLINENOTX86}inline;{$endif}
     /// recognize most used string types, returning their code page
     // - will recognize TSQLRawBlob as the fake CP_SQLRAWBLOB code page
     // - will return the exact code page since Delphi 2009, from RTTI
@@ -2813,8 +2835,8 @@ type
   // - handle TDateTime properties as ISO-8061 encoded TEXT
   // - handle TTimeLog properties as properietary fast INTEGER date time
   // - handle Currency property as FLOAT (safely converted to/from currency)
-  // - handle TSQLRecord descendant properties as INTEGER ROWID index to another record
-  // (warning: the value contains pointer(ROWID), not a valid object memory - you
+  // - handle TSQLRecord descendant properties as INTEGER RowID index to another record
+  // (warning: the value contains pointer(RowID), not a valid object memory - you
   // have to manually retrieve the record, using a integer(IDField) typecast)
   // - handle TSQLRecordMany descendant properties as an "has many" instance (this
   // is a particular case of TSQLRecord: it won't contain pointer(ID), but an object)
@@ -2924,12 +2946,12 @@ type
     /// the type information of this property
     // - will de-reference the PropType pointer on Delphi and newer FPC compilers
     function TypeInfo: PTypeInfo;
-      {$ifdef HASINLINE}inline;{$endif}
+      {$ifdef HASINLINENOTX86}inline;{$endif}
     /// get the next property information
     // - no range check: use ClassProp()^.PropCount to determine the properties count
     // - get the first PPropInfo with ClassProp()^.PropList
     function Next: PPropInfo;
-      {$ifdef FPC}inline;{$else}{$ifdef HASINLINE}inline;{$endif} {$endif}
+      {$ifdef FPC}inline;{$else}{$ifdef HASINLINENOTX86}inline;{$endif} {$endif}
     /// return FALSE (AS_UNIQUE) if was marked as "stored AS_UNIQUE"
     //  (i.e. "stored false"), or TRUE by default
     // - if Instance=nil, will work only at RTTI level, not with field or method
@@ -2995,7 +3017,7 @@ type
     // - it will convert the property content into RawUTF8, for RawUnicode,
     // WinAnsiString, TSQLRawBlob and generic Delphi 6-2007 string property
     // - will set WideString and UnicodeString properties from UTF-8 content
-    procedure SetLongStrValue(Instance: TObject; const Value: RawUTF8);
+    procedure SetLongStrValue(Instance: TObject; const Value: RawUTF8); 
     /// low-level setter of the string property value of a given instance
     // - uses the generic string type: to be used within the VCL
     // - this method will check if the corresponding property is a Long String
@@ -3049,7 +3071,7 @@ type
       {$ifdef HASINLINE}inline;{$endif}
     /// returns the low-level field read address, if GetterIsField is TRUE
     function GetterAddr(Instance: pointer): pointer;
-      {$ifdef HASINLINE}inline;{$endif}
+      {$ifdef HASINLINENOTX86}inline;{$endif}
     /// returns the low-level field write address, if SetterIsField is TRUE
     function SetterAddr(Instance: pointer): pointer;
       {$ifdef HASINLINE}inline;{$endif}
@@ -3438,8 +3460,10 @@ type
   /// information about an ordinal Int32 published property
   TSQLPropInfoRTTIInt32 = class(TSQLPropInfoRTTI)
   protected
+    fUnsigned: boolean;
     procedure CopySameClassProp(Source: TObject; DestInfo: TSQLPropInfo; Dest: TObject); override;
   public
+    constructor Create(aPropInfo: PPropInfo; aPropIndex: integer; aSQLFieldType: TSQLFieldType); override;
     procedure SetValue(Instance: TObject; Value: PUTF8Char; wasString: boolean); override;
     procedure GetValueVar(Instance: TObject; ToSQL: boolean;
       var result: RawUTF8; wasSQLString: PBoolean); override;
@@ -3514,6 +3538,10 @@ type
   /// information about a TUnixTime published property
   // - stored as an Int64, but with a specific class
   TSQLPropInfoRTTIUnixTime = class(TSQLPropInfoRTTIInt64);
+
+  /// information about a TUnixMSTime published property
+  // - stored as an Int64, but with a specific class
+  TSQLPropInfoRTTIUnixMSTime = class(TSQLPropInfoRTTIInt64);
 
   /// information about a floating-point Double published property
   TSQLPropInfoRTTIDouble = class(TSQLPropInfoRTTI)
@@ -4142,14 +4170,28 @@ type
     // - setting both aReader=aWriter=nil will return back to the default class
     // serialization (i.e. published properties serialization)
     // - note that any inherited classes will be serialized as the parent class
+    // - this method is thread-safe, but should be called before any serialization
     class procedure RegisterCustomSerializer(aClass: TClass;
       aReader: TJSONSerializerCustomReader; aWriter: TJSONSerializerCustomWriter);
+    /// define custom serialization of field names for a given class
+    // - any aClassField[] property name will be serialized using aJsonFields[]
+    // - if any aJsonFields[] equals '', this published property will be
+    // excluded from the serialization object
+    // - setting both aClassField=aJsonFields=[] will return back to the default
+    // class serialization (i.e. serialization with published properties names)
+    // - by design, this customization excludes RegisterCustomSerializer() with
+    // custom reader/writer callbacks
+    // - note that any inherited classes will be serialized as the parent class
+    // - this method is thread-safe, but should be called before any serialization
+    class procedure RegisterCustomSerializerFieldNames(aClass: TClass;
+      const aClassFields, aJsonFields: array of ShortString);
     /// let a given class be recognized by JSONToObject() from "ClassName":".."
     // - TObjectList item instances will be created corresponding to the
     // serialized class name field specified, and JSONToNewObject() can create a
     // new instance using the "ClassName":"..." field to identify the class type
     // - by default, all referenced TSQLRecord classes will be globally
     // registered when TSQLRecordProperties information is retrieved
+    // - this method is thread-safe, but should be called before any serialization
     class procedure RegisterClassForJSON(aItemClass: TClass); overload;
     /// let a given class be recognized by JSONToObject() from "ClassName":".."
     // - TObjectList item instances will be created corresponding to the
@@ -4157,6 +4199,7 @@ type
     // new instance using the "ClassName":"..." field to identify the class type
     // - by default, all referenced TSQLRecord classes will be globally
     // registered when TSQLRecordProperties information is retrieved
+    // - this method is thread-safe, but should be called before any serialization
     class procedure RegisterClassForJSON(const aItemClass: array of TClass); overload;
     {$ifndef LVCL}
     /// let a given TCollection be recognized during JSON serialization
@@ -4168,6 +4211,7 @@ type
     // without defining a new method and inherits from TInterfacedCollection
     // - note that both supplied classes will be registered for the internal
     // "ClassName":"..." RegisterClassForJSON() process
+    // - this method is thread-safe, but should be called before any serialization
     class procedure RegisterCollectionForJSON(aCollection: TCollectionClass;
       aItem: TCollectionItemClass);
     {$endif}
@@ -4230,9 +4274,18 @@ function ClassFieldInstance(Instance: TObject; const PropName: shortstring;
 function ClassFieldPropWithParentsFromUTF8(aClassType: TClass; PropName: PUTF8Char;
   PropNameLen: integer): PPropInfo;
 
-/// retrieve a Field property RTTI information searching for a Property class type
+/// retrieve a Field property RTTI information searching for an exact Property class type
 // - this special version also search into parent properties
 function ClassFieldPropWithParentsFromClassType(aClassType,aSearchedClassType: TClass): PPropInfo;
+
+/// retrieve a Field property RTTI information searching for an inherited Property class type
+// - this special version also search into parent properties
+function ClassFieldPropWithParentsInheritsFromClassType(aClassType,aSearchedClassType: TClass): PPropInfo;
+
+/// retrieve a Field property RTTI information searching for an exact Property offset address
+// - this special version also search into parent properties
+function ClassFieldPropWithParentsFromClassOffset(aClassType: TClass;
+  aSearchedOffset: pointer): PPropInfo;
 
 /// retrieve a class Field property instance from a Property class type
 // - this version also search into parent properties
@@ -4370,20 +4423,26 @@ type
   /// class-reference type (metaclass) of a TInterfacedCollection kind
   TInterfacedCollectionClass = class of TInterfacedCollection;
 
-  /// abstract TCollectionItem class, which will instantiate all its nested
-  // TPersistent/TSynPersistent class published properties, then release them when freed
+  /// abstract TCollectionItem class, which will instantiate all its nested class
+  // published properties, then release them (and any T*ObjArray) when freed
   // - could be used for gathering of TCollectionItem properties, e.g. for
   // Domain objects in DDD, especially for list of value objects
-  // - note that non published properties won't be instantiated
-  // - please take care that you will not create any endless recursion: you
-  // should ensure that at one level, nested published properties won't have any
-  // class instance matching its parent type
+  // - consider using T*ObjArray dynamic array published properties in your
+  // value types instead of TCollection storage: T*ObjArray have a lower overhead
+  // and are easier to work with, once TJSONSerializer.RegisterObjArrayForJSON
+  // is called to register the T*ObjArray type 
+  // - note that non published (e.g. public) properties won't be instantiated,
+  // serialized, nor released - but may contain weak references to other classes
+  // - please take care that you will not create any endless recursion: you should
+  // ensure that at one level, nested published properties won't have any class
+  // instance refering to its owner (there is no weak reference - remember!)
   // - since the destructor will release all nested properties, you should
-  // never store a reference of any of those nested instances outside
+  // never store a reference to any of those nested instances if this owner
+  // may be freed before
   TCollectionItemAutoCreateFields = class(TCollectionItem)
   public
     /// this overriden constructor will instantiate all its nested
-    // TPersistent class published properties
+    // TPersistent/TSynPersistent/TSynAutoCreateFields published properties
     constructor Create(Collection: TCollection); override;
     /// finalize the instance, and release its published properties
     destructor Destroy; override;
@@ -4393,44 +4452,51 @@ type
 
   /// abstract TPersistent class, which will instantiate all its nested TPersistent
   // class published properties, then release them (and any T*ObjArray) when freed
-  // - TSynAutoCreateFields is to be preferred in most cases, due to its lower overhead
-  // - note that non published (e.g. public) properties won't be instantiated
-  // - please take care that you will not create any endless recursion: you
-  // should ensure that at one level, nested published properties won't have any
-  // class instance matching its parent type
+  // - TSynAutoCreateFields is to be preferred in most cases, thanks to its
+  // lower overhead
+  // - note that non published (e.g. public) properties won't be instantiated,
+  // serialized, nor released - but may contain weak references to other classes
+  // - please take care that you will not create any endless recursion: you should
+  // ensure that at one level, nested published properties won't have any class
+  // instance refering to its owner (there is no weak reference - remember!)
   // - since the destructor will release all nested properties, you should
-  // never store a reference of any of those nested instances outside
+  // never store a reference to any of those nested instances if this owner
+  // may be freed before
   TPersistentAutoCreateFields = class(TPersistentWithCustomCreate)
   public
     /// this overriden constructor will instantiate all its nested
-    // TPersistent class published properties
+    // TPersistent/TSynPersistent/TSynAutoCreateFields published properties
     constructor Create; override;
     /// finalize the instance, and release its published properties
     destructor Destroy; override;
   end;
 
   /// our own empowered TPersistentAutoCreateFields-like parent class
-  // - TPersistent/TPersistentAutoCreateFields have an unexpected speed overhead
-  // due a giant lock introduced to manage property name fixup resolution
-  // (which we won't use outside the VCL)
-  // - abstract class able with a virtual constructor, RTTI for published
-  // properties, and automatic memory management of all nested class
-  // published properties
+  // - this class is a perfect parent to store any data by value, e.g. DDD Value
+  // Objects, Entities or Aggregates
+  // - is defined as an abstract class able with a virtual constructor, RTTI
+  // for published properties, and automatic memory management of all nested
+  // class published properties: any class defined as a published property will
+  // be owned by this instance - i.e. with strong reference
   // - will also release any T*ObjArray dynamic array storage of persistents,
   // previously registered via TJSONSerializer.RegisterObjArrayForJSON()
-  // - this class is a perfect parent for any class storing data by value, e.g.
-  // DDD Value Objects, Entities or Aggregates
-  // - note that non published (e.g. public) properties won't be instantiated
-  // - please take care that you will not create any endless recursion: you
-  // should ensure that at one level, nested published properties won't have any
-  // class instance matching its parent type
+  // - nested published classes (or T*ObjArray) don't need to inherit from
+  // TSynAutoCreateFields: they may be from any TPersistent/TSynPersistent type
+  // - note that non published (e.g. public) properties won't be instantiated,
+  // serialized, nor released - but may contain weak references to other classes
+  // - please take care that you will not create any endless recursion: you should
+  // ensure that at one level, nested published properties won't have any class
+  // instance refering to its owner (there is no weak reference - remember!)
   // - since the destructor will release all nested properties, you should
   // never store a reference to any of those nested instances if this owner
   // may be freed before
+  // - TPersistent/TPersistentAutoCreateFields have an unexpected speed overhead
+  // due a giant lock introduced to manage property name fixup resolution
+  // (which we won't use outside the VCL) - this class is definitively faster
   TSynAutoCreateFields = class(TSynPersistent)
   public
     /// this overriden constructor will instantiate all its nested
-    // TPersistent/TSynPersistent/TSynAutoCreateFields class published properties
+    // TPersistent/TSynPersistent/TSynAutoCreateFields published properties
     {$ifdef FPC_OR_PUREPASCAL}
     constructor Create; override;
     {$else}
@@ -4438,6 +4504,12 @@ type
     {$endif}
     /// finalize the instance, and release its published properties
     destructor Destroy; override;
+    /// virtual method allowing instance customization after initialization
+    // - called e.g. by JsonToObject, but may be executed after manual fields
+    // assignment
+    // - do nothing by default
+    // - may be overriden for string interning or content customization
+    procedure AfterLoad; virtual;
   end;
 
   /// adding locking methods to a TSynAutoCreateFields with virtual constructor
@@ -4460,18 +4532,22 @@ type
 
   /// abstract TInterfacedObject class, which will instantiate all its nested
   // TPersistent/TSynPersistent published properties, then release them when freed
+  // - will handle automatic memory management of all nested class and T*ObjArray
+  // published properties: any class or T*ObjArray defined as a published
+  // property will be owned by this instance - i.e. with strong reference
+  // - non published properties (e.g. public) won't be instantiated, so may
+  // store weak class references
   // - could be used for gathering of TCollectionItem properties, e.g. for
-  // Domain objects in DDD, especially for list of value objects
-  // - note that non published properties won't be instantiated
-  // - please take care that you will not create any endless recursion: you
-  // should ensure that at one level, nested published properties won't have any
-  // class instance matching its parent type
+  // Domain objects in DDD, especially for list of value objects, with some
+  // additional methods defined by an Interface
   // - since the destructor will release all nested properties, you should
-  // never store a reference of any of those nested instances outside
+  // never store a reference to any of those nested instances if this owner
+  // may be freed before
   TInterfacedObjectAutoCreateFields = class(TInterfacedObjectWithCustomCreate)
   public
     /// this overriden constructor will instantiate all its nested
-    // TPersistent/TSynPersistent/TSynAutoCreateFields class published properties
+    // TPersistent/TSynPersistent/TSynAutoCreateFields class and T*ObjArray
+    // published properties
     constructor Create; override;
     /// finalize the instance, and release its published properties
     destructor Destroy; override;
@@ -4689,6 +4765,15 @@ function StatusCodeToErrorMsg(Code: integer): RawUTF8; overload;
 // requests in the internal server statistics
 function StatusCodeIsSuccess(Code: integer): boolean;
   {$ifdef HASINLINE}inline;{$endif}
+
+/// check the supplied HTTP header to not contain more than one EOL
+// - to avoid unexpected HTTP body injection, e.g. from unsafe business code 
+function IsInvalidHttpHeader(head: PUTF8Char; headlen: integer): boolean;
+
+/// computes an URI with optional jwt authentication parameter
+// - if AuthenticationBearer is set, will add its values as additional parameter:
+// $ URI?authenticationbearer=URIAuthenticationBearer
+function AuthURI(const URI, URIAuthenticationBearer: RawUTF8): RawUTF8;
 
 type
   /// the available HTTP methods transmitted between client and server
@@ -5133,14 +5218,14 @@ type
   TSQLPropInfoRTTIManyObjArray = array of TSQLPropInfoRTTIMany;
 
   /// the kind of SQlite3 (virtual) table
-  // - TSQLRecordFTS3 will be associated with vFTS3, TSQLRecordFTS4 with vFTS4,
+  // - TSQLRecordFTS3/4/5 will be associated with vFTS3/vFTS4/vFTS5 values,
   // TSQLRecordRTree with vRTree, any native SQlite3 table as vSQLite3, and
   // a TSQLRecordVirtualTable*ID with rCustomForcedID/rCustomAutoID
   // - a plain TSQLRecord class can be defined as rCustomForcedID (e.g. for
   // TSQLRecordMany) after registration for an external DB via a call to
   // VirtualTableExternalRegister() from mORMotDB unit
   TSQLRecordVirtualKind = (
-    rSQLite3, rFTS3, rFTS4, rRTree, rCustomForcedID, rCustomAutoID);
+    rSQLite3, rFTS3, rFTS4, rFTS5, rRTree, rCustomForcedID, rCustomAutoID);
 
   /// kind of (static) database server implementation available
   // - sMainEngine will identify the default main SQlite3 engine
@@ -5762,6 +5847,17 @@ type
   // unless you know what you are doing)
   TServiceMethodOptions = set of TServiceMethodOption;
 
+  /// class-reference type (metaclass) for storing interface-based service
+  // execution statistics
+  // - you could inherit from TSQLRecordServiceLog, and specify additional
+  // fields corresponding to the execution context
+  TSQLRecordServiceLogClass = class of TSQLRecordServiceLog;
+
+  /// class-reference type (metaclass) for storing interface-based service
+  // execution statistics used for DB-based asynchronous notifications
+  // - as used by TServiceFactoryClient.SendNotifications
+  TSQLRecordServiceNotificationsClass = class of TSQLRecordServiceNotifications;
+
   /// internal per-method list of execution context as hold in TServiceFactory
   TServiceFactoryExecution = record
     /// the list of denied TSQLAuthGroup ID(s)
@@ -5775,10 +5871,7 @@ type
     /// where execution information should be written as TSQLRecordServiceLog
     LogRest: TSQLRest;
     /// the TSQLRecordServiceLog class to use, as defined in LogRest.Model
-    LogClassModelIndex: integer;
-    /// curent BATCH instance used to write on LogRest
-    // - points to a TServiceFactoryServer.fLogRestBatch[] instance
-    LogRestBatch: TSQLRestBatchLocked;
+    LogClass: TSQLRecordServiceLogClass;
   end;
   /// points to the execution context of one method within TServiceFactory
   PServiceFactoryExecution = ^TServiceFactoryExecution;
@@ -6793,7 +6886,7 @@ type
     // - if SendData is true, content of Value is sent to the server as JSON
     // - if ForceID is true, client sends the Value.ID field to use this ID for
     // adding the record (instead of a database-generated ID)
-    // - if Value is TSQLRecordFTS3, Value.ID is stored to the virtual table
+    // - if Value is TSQLRecordFTS3/4/5, Value.ID is stored to the virtual table
     // - Value class MUST match the TSQLRecordClass used at BatchStart,
     // or may be of any kind if no class was specified
     // - BLOB fields are NEVER transmitted here, even if ForceBlobTransfert=TRUE
@@ -6847,10 +6940,12 @@ type
     function RawAppend(FullRow: boolean=true): TTextWriter;
     /// allow to append some JSON content to the internal raw buffer for a POST
     // - could be used to emulate Add() with an already pre-computed JSON object
-    procedure RawAdd(const SentData: RawUTF8);
+    // - returns the corresponding index in the current BATCH sequence, -1 on error
+    function RawAdd(const SentData: RawUTF8): integer;
     /// allow to append some JSON content to the internal raw buffer for a PUT
     // - could be used to emulate Update() with an already pre-computed JSON object
-    procedure RawUpdate(const SentData: RawUTF8; ID: TID);
+    // - returns the corresponding index in the current BATCH sequence, -1 on error
+    function RawUpdate(const SentData: RawUTF8; ID: TID): integer;
     /// close a BATCH sequence started by Start method
     // - Data is ready to be supplied to TSQLRest.BatchSend() overloaded method
     // - will also notify the TSQLRest.Cache for all deleted IDs
@@ -6919,6 +7014,7 @@ type
     function GetHasBlob: boolean;
     function GetSimpleFieldCount: integer;
     function GetFillCurrentRow: integer;
+    function GetFillReachedEnd: boolean;
     function GetTable: TSQLTable;
   protected
     fInternalState: cardinal;
@@ -7312,13 +7408,21 @@ type
     constructor CreateAndFillPrepare(aClient: TSQLRest; const aIDs: array of Int64;
       const aCustomFieldsCSV: RawUTF8=''); overload;
     /// this constructor initializes the object, and prepares itself to loop
-    // through a specified JSON table
+    // through a specified JSON table, which will use a private copy
     // - this method creates a TSQLTableJSON, fill it with the supplied JSON buffer,
     // then call FillPrepare - previous Create(aClient) methods retrieve only
     // one record, this one more multiple rows
     // - you should then loop for all rows using 'while Rec.FillOne do ...'
     // - the TSQLTableJSON will be freed by TSQLRecord.Destroy
     constructor CreateAndFillPrepare(const aJSON: RawUTF8); overload;
+    /// this constructor initializes the object, and prepares itself to loop
+    // through a specified JSON table buffer, which will be modified in-place
+    // - this method creates a TSQLTableJSON, fill it with the supplied JSON buffer,
+    // then call FillPrepare - previous Create(aClient) methods retrieve only
+    // one record, this one more multiple rows
+    // - you should then loop for all rows using 'while Rec.FillOne do ...'
+    // - the TSQLTableJSON will be freed by TSQLRecord.Destroy
+    constructor CreateAndFillPrepare(aJSON: PUTF8Char; aJSONLen: integer); overload;
     /// this constructor initializes the object from its ID, including all
     // nested TSQLRecord properties, through a JOINed statement
     // - by default, Create(aClient,aID) will return only the one-to-one
@@ -7902,6 +8006,9 @@ type
     /// this property contains the current row number (beginning with 1),
     // initialized to 1 by FillPrepare(), which will be read by FillOne
     property FillCurrentRow: integer read GetFillCurrentRow;
+    /// this property is set to true, if all rows have been browsed after
+    // FillPrepare / while FillOne do ... 
+    property FillReachedEnd: boolean read GetFillReachedEnd;
     /// used internally by FillPrepare() and corresponding Fill*() methods
     property FillContext: TSQLRecordFill read fFill;
     /// this property contains the internal state counter of the server database
@@ -7914,10 +8021,11 @@ type
 
   /// allow on-the-fly translation of a TSQLTable grid value
   // - should return valid JSON value of the given cell (i.e. quoted strings,
-  // or valid JSON object/array)
+  // or valid JSON object/array) unless HumanFriendly is defined
   // - e.g. TSQLTable.OnExportValue property will customize TSQLTable's
   // GetJSONValues, GetHtmlTable, and GetCSVValues methods returned content
-  TOnSQLTableGetValue = function(Sender: TSQLTable; Row, Field: integer): RawJSON of object;
+  TOnSQLTableGetValue = function(Sender: TSQLTable; Row, Field: integer;
+    HumanFriendly: boolean): RawJSON of object;
 
   /// wrapper to an ORM result table, staticaly stored as UTF-8 text
   // - contain all result in memory, until destroyed
@@ -7947,7 +8055,7 @@ type
     fFieldTypeAllRows: boolean;
     /// the field names
     fFieldNames: TRawUTF8DynArray;
-    /// used by FieldIndex() for fast binary search
+    /// used by FieldIndex() for fast O(log(n)) binary search
     fFieldNameOrder: TCardinalDynArray;
     /// contain the fResults[] pointers, after a IDColumnHide() call
     fIDColumn, fNotIDColumn: array of PUTF8Char;
@@ -8076,7 +8184,7 @@ type
     // - sftTimeLog, sftModTime, sftCreateTime will expect the content to be
     // encoded as a TTimeLog Int64 value - as sftInteger may have been
     // identified by TSQLTable.InitFieldTypes
-    // - sftUnixTime field will call UnixTimeToDateTime 
+    // - sftUnixTime/sftUnixMSTime field will call UnixTimeToDateTime/UnixMSTimeToDateTime 
     // - for sftTimeLog, sftModTime, sftCreateTime or sftUnixTime fields, you
     // may have to force the column type, since it may be identified as sftInteger
     // or sftCurrency by default from its JSON number content, e.g. via:
@@ -8121,8 +8229,8 @@ type
     // the associated TSQLModel)
     // - returns the Field Type
     // - return generic string Text, i.e. UnicodeString for Delphi 2009+, ready
-    // to be displayed to the VCL, for sftEnumerate, sftTimeLog, sftUnixTime
-    // and sftRecord/sftRecordVersion/sftID/sftTID
+    // to be displayed to the VCL, for sftEnumerate, sftTimeLog,
+    // sftUnixTime/sftUnixMSTime and sftRecord/sftRecordVersion/sftID/sftTID
     // - returns '' as string Text, if text can by displayed directly
     // with Get*() methods above
     // - returns '' for other properties kind, if UTF8ToString is nil,
@@ -8133,7 +8241,7 @@ type
     // and sftCurrency columns (instead of plain JSON float value), or
     // date/time format as expected by FormatDateTime() for all date time kind
     // of fields (as sftDateTime, sftDateTimeMS, sftTimeLog, sftModTime,
-    // sftCreateTime, sftUnixTime)
+    // sftCreateTime, sftUnixTime, sftUnixMSTime)
     function ExpandAsString(Row,Field: integer; Client: TObject; out Text: string;
       const CustomFormat: string=''): TSQLFieldType;
     /// read-only access to a particular field value, as VCL text
@@ -8447,6 +8555,13 @@ type
     // - returns 0 if not found, or the matching Row number otherwise
     function SearchFieldIdemPChar(const aValue: RawUTF8; FieldIndex: integer;
       StartRow: integer=1): integer;
+    /// search for a value using O(log(n)) binary search of a sorted field
+    // - here the content should have been previously sorted via Sort(),
+    // or CustomCompare should be defined, otherwise the SearchFieldEquals()
+    // slower O(n) method is called
+    // - returns 0 if not found, or the matching Row number otherwise
+    function SearchFieldSorted(const aValue: RawUTF8; FieldIndex: integer;
+      CustomCompare: TUTF8Compare=nil): integer;
 
     /// if the ID column is available, hides it from fResults[]
     // - useful for simplier UI, with a hidden ID field
@@ -8465,26 +8580,28 @@ type
     /// get the Row index corresponding to a specified ID
     // - return the Row number, from 1 to RowCount
     // - return RowCount (last row index) if this ID was not found or no
-    // ID field is available
-    function RowFromID(aID: TID): integer;
+    // ID field is available, unless aNotFoundMinusOne is set, and then -1 is
+    // returned
+    function RowFromID(aID: TID; aNotFoundMinusOne: boolean=false): integer;
 
     /// delete the specified data Row from the Table
     // - only overwrite the internal fResults[] pointers, don't free any memory,
     // nor modify the internal DataSet
-    procedure DeleteRow(Row: integer);
+    function DeleteRow(Row: integer): boolean;
     /// delete the specified Column text from the Table
     // - don't delete the Column: only delete UTF-8 text in all rows for this field
-    procedure DeleteColumnValues(Field: integer);
+    function DeleteColumnValues(Field: integer): boolean;
 
     /// retrieve QueryTables[0], if existing
     function QueryRecordType: TSQLRecordClass;
 
     /// create a new TSQLRecord instance for a specific Table
+    // - a void TSQLRecord instance is created, ready to be filled 
     // - use the specified TSQLRecord class or create one instance
     // of the first associated record class (from internal QueryTables[])
-    // - use this method to create a working copy of a table's record, e.g.
-    // - the record will be freed when the TSQLTable will be destroyed:
-    // you don't need to make a Try..Finally..Free..end block with it
+    // - the returned records will be managed by this TSQLTable: they will be
+    // freed when the TSQLTable is destroyed: you don't need to make a
+    // try..finally..Free..end block with them
     function NewRecord(RecordType: TSQLRecordClass=nil): TSQLRecord;
     /// create a TObjectList with TSQLRecord instances corresponding to this
     // TSQLTable result set
@@ -8512,7 +8629,7 @@ type
     // - returns TRUE on success (even if ObjArray=[]), FALSE on error
     function ToObjArray(var ObjArray; RecordType: TSQLRecordClass=nil): boolean;
 
-    /// After a TSQLTable has been initialized, this method can be called
+    /// after a TSQLTable has been initialized, this method can be called
     // one or more times to iterate through all data rows
     // - you shall call this method before calling FieldBuffer()/Field() methods
     // - return TRUE on success, with data ready to be retrieved by Field*()
@@ -8557,6 +8674,16 @@ type
     // - raise an ESQLTableException if called outside valid Step() sequence
     // - similar to GetAsFloat() method, but for the current Step
     function FieldAsFloat(const FieldName: RawUTF8): TSynExtended; overload;
+      {$ifdef HASINLINE}inline;{$endif}
+    /// read-only access to a particular field value, as RawUTF8
+    // - raise an ESQLTableException if called outside valid Step() sequence
+    // - similar to GetU() method, but for the current Step
+    function FieldAsRawUTF8(FieldIndex: Integer): RawUTF8; overload;
+      {$ifdef HASINLINE}inline;{$endif}
+    /// read-only access to a particular field value, as RawUTF8
+    // - raise an ESQLTableException if called outside valid Step() sequence
+    // - similar to GetU() method, but for the current Step
+    function FieldAsRawUTF8(const FieldName: RawUTF8): RawUTF8; overload;
       {$ifdef HASINLINE}inline;{$endif}
     {$ifndef NOVARIANTS}
     /// read-only access to a particular field value, as a variant
@@ -9243,7 +9370,7 @@ type
     /// the shared TSQLRecordProperties information of this TSQLRecord
     // - as retrieved from RTTI
     property Props: TSQLRecordProperties read fProps;
-    /// define if is a normal table (rSQLite3), an FTS3/FTS4/R-Tree virtual
+    /// define if is a normal table (rSQLite3), an FTS/R-Tree virtual
     // table or a custom TSQLVirtualTable*ID (rCustomForcedID/rCustomAutoID)
     // - when set, all internal SQL statements will be (re)created, depending of
     // the expected ID/RowID column name expected (i.e. SQLTableSimpleFields[]
@@ -9287,7 +9414,7 @@ type
     /// for every table, contains a locked record list
     // - very fast, thanks to the use of a dynamic array with one entry by table
     fLocks: TSQLLocksDynArray;
-    /// for fastest SQL Table name lookup via binary search
+    /// for fastest SQL Table name lookup via O(log(n)) binary search
     fSortedTablesName: TRawUTF8DynArray;
     fSortedTablesNameIndex: TIntegerDynArray;
     /// will contain the registered virtual table modules
@@ -9684,7 +9811,7 @@ type
   end;
 
   /// a base record, corresponding to a FTS3 table, i.e. implementing full-text
-  // - FTS3/FTS4 table are SQLite virtual tables which allow users to perform
+  // - FTS3/FTS4/FTS5 tables are SQLite virtual tables allowing users to perform
   // full-text searches on a set of documents. The most common (and effective)
   // way to describe full-text searches is "what Google, Yahoo and Altavista do
   // with documents placed on the World Wide Web". Users input a term, or
@@ -9712,14 +9839,18 @@ type
   // the Porter Stemming algorithm, or TSQLRecordFTS3Unicode61 for Unicode
   // support - see http:// sqlite.org/fts3.html#tokenizer
   // - you can select either the FTS3 engine, or the more efficient (and new)
-  // FTS4 engine (available since version 3.7.4), by using the TSQLRecordFTS4 type
-  // - in order to make FTS3/FTS4 queries, use the dedicated TSQLRest.FTSMatch
+  // FTS4 engine (available since version 3.7.4), by using the TSQLRecordFTS4
+  // type, or TSQLRecordFTS5 for the latest (and preferred) FTS5 engine
+  // - in order to make FTS queries, use the dedicated TSQLRest.FTSMatch
   // method, with the MATCH operator (you can use regular queries, but you must
   // specify 'RowID' instead of 'DocID' or 'ID' because of FTS3 Virtual
   // table specificity):
   // ! var IDs: TIDDynArray;
   // ! if FTSMatch(TSQLMyFTS3Table,'text MATCH "linu*"',IDs) then
   // !  //  you have all matching IDs in IDs[]
+  // - by convention, inherited class name could specify a custom stemming
+  // algorithm by starting with "TSQLRecordFTS3", and adding the algorithm name as
+  // suffix, e.g. TSQLRecordFTS3Porter will create a "tokenize=porter" virtual table
   TSQLRecordFTS3 = class(TSQLRecordVirtual)
   public
      /// optimize the FTS3 virtual table
@@ -9740,29 +9871,28 @@ type
 
   /// this base class will create a FTS3 table using the Porter Stemming algorithm
   // - see http://sqlite.org/fts3.html#tokenizer
+  // - will generate tokenize=porter by convention from the class name
   TSQLRecordFTS3Porter = class(TSQLRecordFTS3);
 
   /// this base class will create a FTS3 table using the Unicode61 Stemming algorithm
   // - see http://sqlite.org/fts3.html#tokenizer
+  // - will generate tokenize=unicode64 by convention from the class name
   TSQLRecordFTS3Unicode61 = class(TSQLRecordFTS3);
 
-  /// class-reference type (metaclass) of a FTS3/FTS4 virtual table
-  TSQLRecordFTS3Class = class of TSQLRecordFTS3;
-
-  /// class-reference type (metaclass) of a RTREE virtual table
-  TSQLRecordRTreeClass = class of TSQLRecordRTree;
-
-  /// a base record, corresdonding to a FTS4 table, which is an enhancement to FTS3
+  /// a base record, corresponding to a FTS4 table, which is an enhancement to FTS3
   // - FTS3 and FTS4 are nearly identical. They share most of their code in common,
   // and their interfaces are the same. The only difference is that FTS4 stores
   // some additional information about the document collection in two of new FTS
   // shadow tables. This additional information allows FTS4 to use certain
   // query performance optimizations that FTS3 cannot use. And the added information
   // permits some additional useful output options in the matchinfo() function.
-  // - For newer applications, TSQLRecordFTS4 is recommended; though if minimal disk
-  // usage or compatibility with older versions of SQLite are important, then
-  // TSQLRecordFTS3 will usually serve just as well.
+  // - for newer applications, TSQLRecordFTS5 is recommended; though if minimal
+  // disk usage or compatibility with older versions of SQLite are important,
+  // then TSQLRecordFTS3 will usually serve just as well
   // - see http:// sqlite.org/fts3.html#section_1_1
+  // - by convention, inherited class name could specify a custom stemming
+  // algorithm by starting with "TSQLRecordFTS4", and adding the algorithm name as
+  // suffix, e.g. TSQLRecordFTS'Porter will create a "tokenize=porter" virtual table
   TSQLRecordFTS4 = class(TSQLRecordFTS3)
   public
     /// this overriden method will create TRIGGERs for FTSWithoutContent()
@@ -9772,11 +9902,41 @@ type
 
   /// this base class will create a FTS4 table using the Porter Stemming algorithm
   // - see http://sqlite.org/fts3.html#tokenizer
+  // - will generate tokenize=porter by convention from the class name
   TSQLRecordFTS4Porter = class(TSQLRecordFTS4);
 
   /// this base class will create a FTS4 table using the Unicode61 Stemming algorithm
   // - see http://sqlite.org/fts3.html#tokenizer
+  // - will generate tokenize=unicode64 by convention from the class name
   TSQLRecordFTS4Unicode61 = class(TSQLRecordFTS4);
+
+  /// a base record, corresponding to a FTS5 table, which is an enhancement to FTS4
+  // - FTS5 is a new version of FTS4 that includes various fixes and solutions for
+  // problems that could not be fixed in FTS4 without sacrificing backwards compatibility
+  // - for newer applications, TSQLRecordFTS5 is recommended; though if minimal
+  // disk usage or compatibility with older versions of SQLite are important,
+  // then TSQLRecordFTS3/TSQLRecordFTS4 will usually serve just as well
+  // - see https://sqlite.org/fts5.html#appendix_a
+  // - by convention, inherited class name could specify a custom stemming
+  // algorithm by starting with "TSQLRecordFTS5", and adding the algorithm name as
+  // suffix, e.g. TSQLRecordFTS5Porter will create a "tokenize=porter" virtual table
+  TSQLRecordFTS5 = class(TSQLRecordFTS4);
+
+  /// this base class will create a FTS5 table using the Porter Stemming algorithm
+  // - see https://sqlite.org/fts5.html#tokenizers
+  // - will generate tokenize=porter by convention from the class name
+  TSQLRecordFTS5Porter = class(TSQLRecordFTS5);
+
+  /// this base class will create a FTS5 table using the Unicode61 Stemming algorithm
+  // - see https://sqlite.org/fts5.html#tokenizers
+  // - will generate tokenize=unicode64 by convention from the class name
+  TSQLRecordFTS5Unicode61 = class(TSQLRecordFTS5);
+
+  /// class-reference type (metaclass) of a FTS3/FTS4/FTS5 virtual table
+  TSQLRecordFTS3Class = class of TSQLRecordFTS3;
+
+  /// class-reference type (metaclass) of a RTREE virtual table
+  TSQLRecordRTreeClass = class of TSQLRecordRTree;
 
   /// the kind of fields to be available in a Table resulting of
   // a TSQLRecordMany.DestGetJoinedTable() method call
@@ -10044,6 +10204,7 @@ type
     fSignatureTime: TTimeLog;
     /// hashed signature
     fSignature: RawUTF8;
+    function ComputeSignature(const UserName,Content: RawByteString): RawUTF8;
   public
     /// time and date of signature
     // - if the signature is invalid, this field will contain numerical 1 value
@@ -10053,16 +10214,16 @@ type
     property SignatureTime: TTimeLog read fSignatureTime write fSignatureTime;
     /// as the Content of this record is added to the database,
     // its value is hashed and stored as 'UserName/03A35C92....' into this property
-    // - very secured SHA-256 hashing is used internaly
+    // - secured SHA-256 hashing is used internaly
     // - digital signature is allowed only once: this property is written only once
     // - this property is defined here to allow inherited to just declared the name
     // in its published section:
-    // ! property SignatureTime;
+    // ! property Signature;
     property Signature: RawUTF8 read fSignature write fSignature;
   public
     /// use this procedure to sign the supplied Content of this record for a
-    // specified UserName, with the current Date and Time  (SHA-256 hashing is used
-    // internaly)
+    // specified UserName, with the current Date and Time
+    // - SHA-256 hashing is used internaly
     // - returns true if signed successfully (not already signed)
     function SetAndSignContent(const UserName: RawUTF8;
       const Content: RawByteString; ForcedSignatureTime: Int64=0): boolean;
@@ -10520,17 +10681,6 @@ type
     property Sent: TTimeLog read fSent write fSent;
   end;
 
-  /// class-reference type (metaclass) for storing interface-based service
-  // execution statistics
-  // - you could inherit from TSQLRecordServiceLog, and specify additional
-  // fields corresponding to the execution context
-  TSQLRecordServiceLogClass = class of TSQLRecordServiceLog;
-
-  /// class-reference type (metaclass) for storing interface-based service
-  // execution statistics used for DB-based asynchronous notifications
-  // - as used by TServiceFactoryClient.SendNotifications
-  TSQLRecordServiceNotificationsClass = class of TSQLRecordServiceNotifications;
-
   TServiceMethodExecute = class;
 
   /// the current step of a TServiceMethodExecute.OnExecute call
@@ -10591,12 +10741,13 @@ type
     // the JSON serialized exception
     function ExecuteJson(const Instances: array of pointer; Par: PUTF8Char;
       Res: TTextWriter; ResAsJSONObject: boolean=false): boolean;
-    /// execute the corresponding method of one weak IInvokable reference,
-    // with no output argument, i.e. no returned data
+    /// execute the corresponding method of one weak IInvokable reference
+    // - exepect no output argument, i.e. no returned data, unless output is set
     // - this version will identify TInterfacedObjectFake implementations,
     // and will call directly fInvoke() if possible, to avoid JSON marshalling
     // - expect params value to be without [ ], just like TOnFakeInstanceInvoke
-    function ExecuteJsonCallback(Instance: pointer; const params: RawUTF8): boolean;
+    function ExecuteJsonCallback(Instance: pointer; const params: RawUTF8;
+      output: PRawUTF8): boolean;
     /// execute directly TInterfacedObjectFake.fInvoke()
     // - expect params value to be with [ ], just like ExecuteJson
     function ExecuteJsonFake(Instance: pointer; params: PUTF8Char): boolean;
@@ -12081,7 +12232,7 @@ type
   // - by default, all methods are allowed to execution: you can call AllowAll,
   // DenyAll, Allow or Deny in order to specify your exact security policy
   TServiceFactoryServer = class(TServiceFactory)
-  protected
+  protected                         
     fInstances: TServiceFactoryServerInstanceDynArray;
     fInstance: TDynArray;
     fInstanceCapacity: integer;
@@ -12106,7 +12257,6 @@ type
     fBackgroundThread: TSynBackgroundThreadMethod;
     fOnMethodExecute: TOnServiceCanExecute;
     fOnExecute: array of TServiceMethodExecuteEvent;
-    fLogRestBatch: array of TSQLRestBatchLocked; // store one BATCH per Rest
     procedure SetServiceLogByIndex(const aMethods: TInterfaceFactoryMethodBits;
       aLogRest: TSQLRest; aLogClass: TSQLRecordServiceLogClass);
     procedure SetTimeoutSecInt(value: cardinal);
@@ -12348,6 +12498,7 @@ type
     // with no '{"result":{...}}' nesting
     // - could be used e.g. for plain non mORMot REST Client with in sicSingle
     // or sicShared mode kind of services
+    // - on client side, consider using TSQLRestClientURI.ServiceDefineSharedAPI
     property ResultAsJSONObjectWithoutResult: boolean
       read fResultAsJSONObjectWithoutResult write fResultAsJSONObjectWithoutResult;
     /// set to TRUE to return the interface's methods result as XML object
@@ -12491,17 +12642,19 @@ type
     // all CONST/VAR parameters, in order
     // - TRUE will generate a JSON object instead, with the CONST/VAR parameter
     // names as field names - may be useful e.g. when working with a non
-    // mORMot server
+    // mORMot server, or when the mORMot server exposes a public API
+    // - defined e.g. by TSQLRestClientURI.ServiceDefineSharedAPI() method
     property ParamsAsJSONObject: boolean read fParamsAsJSONObject write fParamsAsJSONObject;
-    /// set to TRUE to expect the interface's methods result to be a JSON object
+    /// set to TRUE if the interface's methods result is expected to be a JSON object
     // without the {"result":... } nesting
     // - by default (FALSE), any method execution will return a JSON array with
-    // all VAR/OUT parameters, within a {"result":...,id:...} layout
+    // all VAR/OUT parameters, within a {"result":...,"id":...} layout
     // - TRUE will expect a simple JSON object instead, with the VAR/OUT parameter
     // names as field names (and "Result" for any function result) - may be
-    // useful e.g. when working with JavaScript clients
+    // useful e.g. when working with JavaScript clients or any public API
     // - this value can be overridden by setting ForceServiceResultAsJSONObject
     // for a given TSQLRestServerURIContext (e.g. for server-side JavaScript work)
+    // - defined e.g. by TSQLRestClientURI.ServiceDefineSharedAPI() method
     property ResultAsJSONObjectWithoutResult: boolean read fResultAsJSONObject
       write fResultAsJSONObject;
   end;
@@ -13192,6 +13345,12 @@ type
     destructor Destroy; override;
   end;
 
+  /// optionally called after TSQLRest.AsynchRedirect background execution
+  // - to retrieve any output result value, as JSON-encoded content
+  // - as used in TSQLRestBackgroundTimer.AsynchBackgroundExecute protected method
+  TOnAsynchRedirectResult = procedure(const aMethod: TServiceMethod;
+    const aInstance: IInvokable; const aParams, aResult: RawUTF8) of object;
+
   /// TThread able to run one or several tasks at a periodic pace, or do
   // asynchronous interface or batch execution, with proper TSQLRest integration
   // - used e.g. by TSQLRest.TimerEnable/AsynchRedirect/AsynchBatchStart methods
@@ -13200,12 +13359,18 @@ type
   TSQLRestBackgroundTimer = class(TSynBackgroundTimer)
   protected
     fRest: TSQLRest;
-    fName: RawUTF8;
-    fBackgroundBatch: TSQLRestBatchLocked;
+    fBackgroundBatch: array of TSQLRestBatchLocked;
+    fBackgroundInterning: array of TRawUTF8Interning;
+    fBackgroundInterningMaxRefCount: integer;
     // used by AsynchRedirect() and AsynchBatch()
+    function AsynchBatchIndex(aTable: TSQLRecordClass): integer;
+    function AsynchBatchLocked(aTable: TSQLRecordClass; out aBatch: TSQLRestBatchLocked): boolean;
+    procedure AsynchBatchUnLock(aBatch: TSQLRestBatchLocked);
+    procedure AsynchBatchExecute(Sender: TSynBackgroundTimer;
+      Event: TWaitResult; const Msg: RawUTF8);
     procedure AsynchBackgroundExecute(Sender: TSynBackgroundTimer;
       Event: TWaitResult; const Msg: RawUTF8);
-    procedure AsynchBatchExecute(Sender: TSynBackgroundTimer;
+    procedure AsynchBackgroundInterning(Sender: TSynBackgroundTimer;
       Event: TWaitResult; const Msg: RawUTF8);
   public
     /// initialize the thread for a periodic task processing
@@ -13231,7 +13396,8 @@ type
     // to execute something in the context of the initial thread, protected
     // by a critical section (mutex)
     procedure AsynchRedirect(const aGUID: TGUID;
-      const aDestinationInterface: IInvokable; out aCallbackInterface); overload;
+      const aDestinationInterface: IInvokable; out aCallbackInterface;
+      const aOnResult: TOnAsynchRedirectResult=nil); overload;
     /// define asynchronous execution of interface methods in a background thread
     // - this method implements any interface via a fake class, which will
     // redirect all methods calls into calls of another interface, but as a FIFO
@@ -13250,14 +13416,15 @@ type
     // to execute something in the context of the initial thread, protected
     // by a critical section (mutex)
     procedure AsynchRedirect(const aGUID: TGUID;
-      const aDestinationInstance: TInterfacedObject; out aCallbackInterface); overload;
+      const aDestinationInstance: TInterfacedObject; out aCallbackInterface;
+      const aOnResult: TOnAsynchRedirectResult=nil); overload;
     /// prepare an asynchronous ORM BATCH process, executed in a background thread
     // - will initialize a TSQLRestBatch and call TimerEnable to initialize the
     // background thread, following the given processing period (in seconds),
     // or the TSQLRestBatch.Count threshold to call BatchSend
     // - actual REST/CRUD commands will take place via AsynchBatchAdd,
     // AsynchBatchUpdate and AsynchBatchDelete methods
-    // - only a single AsynchBatch() call is allowed at a time, unless
+    // - only a single AsynchBatch() call per Table is allowed at a time, unless
     // AsynchBatchStop method is used to flush the current asynchronous BATCH
     // - using a BATCH in a dedicated thread will allow very fast bacgkround
     // asynchronous process of ORM methods, sufficient for most use cases
@@ -13266,15 +13433,30 @@ type
       Options: TSQLRestBatchOptions=[boExtendedJSON]): boolean;
     /// finalize asynchronous ORM BATCH process, executed in a background thread
     // - should have been preceded by a call to AsynchBatch(), or returns false
-    function AsynchBatchStop: boolean;
+    // - Table=nil will release all existing batch instances
+    function AsynchBatchStop(Table: TSQLRecordClass): boolean;
     /// create a new ORM member in a BATCH to be written in a background thread
     // - should have been preceded by a call to AsynchBatchStart(), or returns -1
-    // - is a wrapper around the TSQLRestBatch.Add() sent in the Timer thread,
+    // - is a wrapper around TSQLRestBatch.Add() sent in the Timer thread,
     // so will return the index in the BATCH rows, not the created TID
     // - this method is thread-safe
     function AsynchBatchAdd(Value: TSQLRecord; SendData: boolean;
       ForceID: boolean=false; const CustomFields: TSQLFieldBits=[];
       DoNotAutoComputeFields: boolean=false): integer;
+    /// append some JSON content in a BATCH to be writen in a background thread
+    // - could be used to emulate AsynchBatchAdd() with an already pre-computed
+    // JSON object
+    // - is a wrapper around TSQLRestBatch.RawAdd() sent in the Timer thread,
+    // so will return the index in the BATCH rows, not the created TID
+    // - this method is thread-safe
+    function AsynchBatchRawAdd(Table: TSQLRecordClass; const SentData: RawUTF8): integer;
+    /// append some JSON content in a BATCH to be writen in a background thread
+    // - could be used to emulate AsynchBatchAdd() with an already pre-computed
+    // JSON object, as stored in a TTextWriter instance
+    // - is a wrapper around TSQLRestBatch.RawAppend.AddNoJSONEscape(SentData) 
+    // in the Timer thread
+    // - this method is thread-safe
+    procedure AsynchBatchRawAppend(Table: TSQLRecordClass; SentData: TTextWriter);
     /// update an ORM member in a BATCH to be written in a background thread
     // - should have been preceded by a call to AsynchBatchStart(), or returns -1
     // - is a wrapper around the TSQLRestBatch.Update() sent in the Timer thread
@@ -13286,9 +13468,14 @@ type
     // - is a wrapper around the TSQLRestBatch.Delete() sent in the Timer thread
     // - this method is thread-safe
     function AsynchBatchDelete(Table: TSQLRecordClass; ID: TID): integer;
+    /// allows background garbage collection of specified RawUTF8 interning
+    // - will run Interning.Clean(2) every 5 minutes by default
+    // - set InterningMaxRefCount=0 to disable process of the Interning instance
+    procedure AsynchInterning(Interning: TRawUTF8Interning;
+      InterningMaxRefCount: integer=2; PeriodMinutes: integer=5);
   published
     /// the identifier of the thread, as logged
-    property Name: RawUTF8 read fName;
+    property Name: RawUTF8 read fThreadName;
   end;
 
   /// a generic REpresentational State Transfer (REST) client/server class
@@ -13414,7 +13601,7 @@ type
     // - implements REST POST collection
     // - SentData can contain the JSON object with field values to be added
     // - class is taken from Model.Tables[TableModelIndex]
-    // - returns the TSQLRecord ID/ROWID value, 0 on error
+    // - returns the TSQLRecord ID/RowID value, 0 on error
     // - if a "RowID":.. or "ID":.. member is set in SentData, it shall force
     // this value as insertion ID
     // - override this method for proper calling the database engine
@@ -13570,6 +13757,10 @@ type
     // - call internaly ExecuteList() to get the value
     function OneFieldValue(Table: TSQLRecordClass;
       const FieldName, WhereClause: RawUTF8): RawUTF8; overload;
+    /// get the Int64 value of an unique field with a Where Clause
+    // - call internaly ExecuteList() to get the value
+    function OneFieldValueInt64(Table: TSQLRecordClass;
+      const FieldName, WhereClause: RawUTF8; Default: Int64=0): Int64;
     /// get the UTF-8 encoded value of an unique field with a Where Clause
     // - this overloaded function will call FormatUTF8 to create the Where Clause
     // from supplied parameters, binding all '?' chars with Args[] values
@@ -13633,7 +13824,7 @@ type
     function OneFieldValues(Table: TSQLRecordClass; const FieldName: RawUTF8;
       const WhereClause: RawUTF8; var Data: TInt64DynArray; SQL: PRawUTF8=nil): boolean; overload;
     /// dedicated method used to retrieve free-text matching DocIDs
-    // - this method will work for both TSQLRecordFTS3 and TSQLRecordFTS4
+    // - this method works for TSQLRecordFTS3, TSQLRecordFTS4 and TSQLRecordFTS5
     // - this method expects the column/field names to be supplied in the MATCH
     // statement clause
     // - example of use:  FTSMatch(TSQLMessage,'Body MATCH :("linu*"):',IntResult)
@@ -13642,7 +13833,7 @@ type
       var DocID: TIDDynArray): boolean; overload;
     /// dedicated method used to retrieve free-text matching DocIDs with
     // enhanced ranking information
-    // - this method will work for both TSQLRecordFTS3 and TSQLRecordFTS4
+    // - this method works for TSQLRecordFTS3, TSQLRecordFTS4 and TSQLRecordFTS5
     // - this method will search in all FTS3 columns, and except some floating-point
     // constants for weigthing each column (there must be the same number of
     // PerFieldWeight parameters as there are columns in the TSQLRecordFTS3 table)
@@ -13960,7 +14151,8 @@ type
     // - you should not have to use this method, but the ORM versions instead
     // - return a result set as JSON on success, '' on failure
     // - will call EngineList() abstract method to retrieve its JSON content
-    function ExecuteJson(const Tables: array of TSQLRecordClass; const SQL: RawUTF8): RawJSON; virtual;
+    function ExecuteJson(const Tables: array of TSQLRecordClass; const SQL: RawUTF8;
+      ForceAJAX: Boolean=false; ReturnedRowCount: PPtrInt=nil): RawJSON; virtual;
     /// Execute directly a SQL statement, without any expected result
     // - implements POST SQL on ModelRoot URI
     // - return true on success
@@ -13996,8 +14188,8 @@ type
     // request, otherwise record is created with default values
     // - if ForceID is true, client sends the Value.ID field to use this ID for
     // adding the record (instead of a database-generated ID)
-    // - on success, returns the new ROWID value; on error, returns 0
-    // - on success, Value.ID is updated with the new ROWID
+    // - on success, returns the new RowID value; on error, returns 0
+    // - on success, Value.ID is updated with the new RowID
     // - the TSQLRawBlob(BLOB) fields values are not set by this method, to
     // preserve bandwidth - see UpdateBlobFields() and AddWithBlobs() methods
     // - the TSQLRecordMany fields are not set either: they are separate
@@ -14438,7 +14630,8 @@ type
     // by a critical section (mutex)
     // - is a wrapper around BackgroundTimer.AsynchRedirect()
     procedure AsynchRedirect(const aGUID: TGUID;
-      const aDestinationInterface: IInvokable; out aCallbackInterface); overload;
+      const aDestinationInterface: IInvokable; out aCallbackInterface;
+      const aOnResult: TOnAsynchRedirectResult=nil); overload;
     /// define asynchronous execution of interface methods in a background thread
     // - this class allows to implements any interface via a fake class, which will
     // redirect all methods calls into calls of another interface, but as a FIFO
@@ -14450,14 +14643,15 @@ type
     // by a critical section (mutex)
     // - is a wrapper around BackgroundTimer.AsynchRedirect()
     procedure AsynchRedirect(const aGUID: TGUID;
-      const aDestinationInstance: TInterfacedObject; out aCallbackInterface); overload;
+      const aDestinationInstance: TInterfacedObject; out aCallbackInterface;
+      const aOnResult: TOnAsynchRedirectResult=nil); overload;
     /// prepare an asynchronous ORM BATCH process, executed in a background thread
     // - will initialize a TSQLRestBatch and call TimerEnable to initialize the
     // background thread, following the given processing period (in seconds),
     // or the TSQLRestBatch.Count threshold to call BatchSend
     // - actual REST/CRUD commands will take place via AsynchBatchAdd,
     // AsynchBatchUpdate and AsynchBatchDelete methods
-    // - only a single AsynchBatch() call is allowed at a time, unless
+    // - only a single AsynchBatch() call per Table is allowed at a time, unless
     // AsynchBatchStop method is used to flush the current asynchronous BATCH
     // - using a BATCH in a dedicated thread will allow very fast bacgkround
     // asynchronous process of ORM methods, sufficient for most use cases
@@ -14467,8 +14661,9 @@ type
       Options: TSQLRestBatchOptions=[boExtendedJSON]): boolean;
     /// finalize asynchronous ORM BATCH process, executed in a background thread
     // - should have been preceded by a call to AsynchBatch(), or returns false
+    // - Table=nil will release all existing batch instances
     // - is a wrapper around BackgroundTimer.AsynchBatchStop()
-    function AsynchBatchStop: boolean;
+    function AsynchBatchStop(Table: TSQLRecordClass): boolean;
     /// create a new ORM member in a BATCH to be written in a background thread
     // - should have been preceded by a call to AsynchBatchStart(), or returns -1
     // - is a wrapper around BackgroundTimer.AsynchBatchAdd(),
@@ -14477,6 +14672,19 @@ type
     function AsynchBatchAdd(Value: TSQLRecord; SendData: boolean;
       ForceID: boolean=false; const CustomFields: TSQLFieldBits=[];
       DoNotAutoComputeFields: boolean=false): integer;
+    /// append some JSON content in a BATCH to be written in a background thread
+    // - could be used to emulate AsynchBatchAdd() with an already pre-computed
+    // JSON object
+    // - is a wrapper around BackgroundTimer.AsynchBatchRawAdd(),
+    // so will return the index in the BATCH rows, not the created TID
+    // - this method is thread-safe
+    function AsynchBatchRawAdd(Table: TSQLRecordClass; const SentData: RawUTF8): integer;
+    /// append some JSON content in a BATCH to be writen in a background thread
+    // - could be used to emulate AsynchBatchAdd() with an already pre-computed
+    // JSON object, as stored in a TTextWriter instance
+    // - is a wrapper around BackgroundTimer.AsynchBatchRawAppend()
+    // - this method is thread-safe
+    procedure AsynchBatchRawAppend(Table: TSQLRecordClass; SentData: TTextWriter);
     /// update an ORM member in a BATCH to be written in a background thread
     // - should have been preceded by a call to AsynchBatchStart(), or returns -1
     // - is a wrapper around BackgroundTimer.AsynchBatchUpdate()
@@ -14488,6 +14696,16 @@ type
     // - is a wrapper around the TSQLRestBatch.Delete() sent in the Timer thread
     // - this method is thread-safe
     function AsynchBatchDelete(Table: TSQLRecordClass; ID: TID): integer;
+    /// allows background garbage collection of specified RawUTF8 interning
+    // - will run Interning.Clean(2) every 5 minutes by default
+    // - set InterningMaxRefCount=0 to disable process of the Interning instance
+    // - note that InterningMaxRefCount and PeriodMinutes parameters (if not 0),
+    // are common for all TRawUTF8Interning instances (the latest value wins)
+    // - you may e.g. run the following to clean up TDocVariant interned RawUTF8:
+    // ! aRest.AsynchInterning(DocVariantType.InternNames);
+    // ! aRest.AsynchInterning(DocVariantType.InternValues);
+    procedure AsynchInterning(Interning: TRawUTF8Interning;
+      InterningMaxRefCount: integer=2; PeriodMinutes: integer=5);
     /// define redirection of interface methods calls in one or several instances
     // - this class allows to implements any interface via a fake class, which
     // will redirect all methods calls to one or several other interfaces
@@ -14515,6 +14733,7 @@ type
     // the TSystemUse.Current class function
     // - do nothing if global TSystemUse.Current was already assigned
     function SystemUseTrack(periodSec: integer=10): TSystemUse;
+
     /// how this class execute its internal commands
     // - by default, TSQLRestServer.URI() will lock for Write ORM according to
     // AcquireWriteMode (i.e. AcquireExecutionMode[execORMWrite]=amLocked) and
@@ -14850,6 +15069,10 @@ type
   // - should return TRUE to execute Ctxt.Error(E,...), FALSE if returned
   // content has already been set as expected by the client
   TNotifyErrorURI = function(Ctxt: TSQLRestServerURIContext; E: Exception): boolean of object;
+  {$ifndef NOVARIANTS}
+  /// callback allowing to customize the information returned by root/pcmman/info
+  TOnInternalInfo = procedure(Sender: TSQLRestServer; var info: TDocVariantData) of object;
+  {$endif}
 
   TSQLRestStorageInMemory = class;
   TSQLVirtualTableModule = class;
@@ -16131,6 +16354,9 @@ type
   // - TSQLRestServerURIContext.AuthenticationBearerToken will return the
   // ?authenticationbearer=... URI parameter value alternatively to the HTTP
   // header unless rsoAuthenticationURIDisable is set (for security reasons)
+  // - you can switch off root/timestamp/info URI via rsoTimeStampInfoURIDisable
+  // - URI() header output will be sanitized for any EOL injection, unless
+  // rsoHttpHeaderCheckDisable is defined (to gain a few cycles?) 
   TSQLRestServerOption = (
     rsoNoAJAXJSON,
     rsoGetAsJsonNotAsString,
@@ -16142,7 +16368,9 @@ type
     rsoSecureConnectionRequired,
     rsoCookieIncludeRootPath,
     rsoCookieHttpOnlyFlagDisable,
-    rsoAuthenticationURIDisable);
+    rsoAuthenticationURIDisable,
+    rsoTimeStampInfoURIDisable,
+    rsoHttpHeaderCheckDisable);
   /// allow to customize the TSQLRestServer process via its Options property
   TSQLRestServerOptions = set of TSQLRestServerOption;
 
@@ -16422,6 +16650,12 @@ type
     // - should return TRUE to execute Ctxt.Error(E,...), FALSE if returned
     // content has already been set as expected by the client
     OnErrorURI: TNotifyErrorURI;
+    {$ifndef NOVARIANTS}
+    /// event to customize the information returned by root/pcmman/info
+    // - called by TSQLRestServer.InternalInfo method
+    // - you can add some application-level information for monitoring
+    OnInternalInfo: TOnInternalInfo;
+    {$endif}
     /// event trigerred when URI() is called, and at least 128 ms is elapsed
     // - could be used to execute some additional process after a period of time
     // - note that if TSQLRestServer.URI is not called by any client, this
@@ -17403,7 +17637,7 @@ type
     fValue: TObjectList;
     fFileName: TFileName;
     /// true if IDs are sorted (which is the default behavior of this class),
-    // for fastest ID2Index() by using a binary search algorithm
+    // for fastest ID2Index() by using O(log(n)) binary search algorithm
     fIDSorted: boolean;
     fCommitShouldNotUpdateFile: boolean;
     fBinaryFile: boolean;
@@ -17421,10 +17655,6 @@ type
     procedure SetBinaryFile(aBinary: boolean);
     procedure GetJSONValuesEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
     procedure AddIntegerDynArrayEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
-    procedure DoNothingEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
-    procedure DoInstanceEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
-    procedure DoIndexEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
-    procedure DoCopyEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
     /// used to create the JSON content from a SELECT parsed command
     // - WhereField index follows FindWhereEqual / TSynTableStatement.WhereField
     // - returns the number of data row added (excluding field names)
@@ -17509,7 +17739,7 @@ type
     procedure ReloadFromFile;
     /// retrieve the index in Items[] of a particular ID
     // - return -1 if this ID was not found
-    // - use fast binary search algorithm (since Items[].ID should be increasing)
+    // - use fast O(log(n)) binary search algorithm (since Items[].ID are increasing)
     // - warning: this method should be protected via StorageLock/StorageUnlock
     function IDToIndex(ID: TID): integer;
     /// retrieve all IDs stored at once
@@ -17623,9 +17853,17 @@ type
     // - will only handle integer/Int64 kind of column
     function FindMax(WhereField: integer; out max: Int64): boolean;
     /// execute a method on every TSQLRecord item
-    // - the loop execution will be protected via StorageLock/StorageUnlock 
+    // - the loop execution will be protected via StorageLock/StorageUnlock
     procedure ForEach(WillModifyContent: boolean;
       OnEachProcess: TFindWhereEqualEvent; Dest: pointer);
+    /// low-level TFindWhereEqualEvent callback doing nothing
+    class procedure DoNothingEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
+    /// low-level TFindWhereEqualEvent callback setting PPointer(aDest)^ := aRec
+    class procedure DoInstanceEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
+    /// low-level TFindWhereEqualEvent callback setting PInteger(aDest)^ := aIndex
+    class procedure DoIndexEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
+    /// low-level TFindWhereEqualEvent callback PPointer(aDest)^ := aRec.CreateCopy
+    class procedure DoCopyEvent(aDest: pointer; aRec: TSQLRecord; aIndex: integer);
     /// read-only access to the TSQLRecord values, storing the data
     // - this returns directly the item class instance stored in memory: if you
     // change the content, it will affect the internal data - so for instance
@@ -18061,8 +18299,8 @@ type
     // - server must return Status 201/HTTP_CREATED on success
     // - server must send on success an header entry with
     // $ Location: ModelRoot/TableName/TableID
-    // - on success, returns the new ROWID value; on error, returns 0
-    // - on success, Value.ID is updated with the new ROWID
+    // - on success, returns the new RowID value; on error, returns 0
+    // - on success, Value.ID is updated with the new RowID
     // - if aValue is TSQLRecordFTS3, Value.ID is stored to the virtual table
     // - this overridden method will send BLOB fields, if ForceBlobTransfert is set
     function InternalAdd(Value: TSQLRecord; SendData: boolean; CustomFields: PSQLFieldBits;
@@ -18310,7 +18548,7 @@ type
     fBackgroundThread: TSynBackgroundThreadEvent;
     fOnIdle: TOnIdleSynBackgroundThread;
     fOnFailed: TOnClientFailed;
-    fInternalOpen: set of (ioOpened, ioNoOpen);
+    fInternalState: set of (isOpened, isDestroying, isInAuth);
     fRemoteLogThread: TObject; // private TRemoteLogThread
     fFakeCallbacks: TSQLRestClientCallbacks;
     function FakeCallbackRegister(Sender: TServiceFactoryClient;
@@ -18676,16 +18914,24 @@ type
       aInstanceCreation: TServiceInstanceImplementation=sicSingle;
       const aContractExpected: RawUTF8=''): boolean; overload;
     /// register a Service on the client side via its interface
-    // - this method expects the interface(s) to have been registered previously:
+    // - this method expects the interface to have been registered previously:
     // ! TInterfaceFactory.RegisterInterfaces([TypeInfo(IMyInterface),...]);
     function ServiceDefine(const aInterface: TGUID;
       aInstanceCreation: TServiceInstanceImplementation=sicSingle;
       const aContractExpected: RawUTF8=''): TServiceFactoryClient; overload;
     /// register and retrieve the sicClientDriven Service instance
-    // - this method expects the interface(s) to have been registered previously:
+    // - this method expects the interface to have been registered previously:
     // ! TInterfaceFactory.RegisterInterfaces([TypeInfo(IMyInterface),...]);
     function ServiceDefineClientDriven(const aInterface: TGUID; out Obj;
-      const aContractExpected: RawUTF8=''): boolean; overload;
+      const aContractExpected: RawUTF8=''): boolean; 
+    /// register a sicShared Service instance communicating via JSON objects
+    // - will force SERVICE_CONTRACT_NONE_EXPECTED, ParamsAsJSONObject=true and
+    // ResultAsJSONObjectWithoutResult=true
+    // - may be used e.g. for accessing a sessionless public REST/JSON API, i.e.
+    // ! TSQLRestServer.ServiceDefine(...).ResultAsJSONObjectWithoutResult := true
+    // - this method expects the interface to have been registered previously:
+    // ! TInterfaceFactory.RegisterInterfaces([TypeInfo(IMyInterface),...]);
+    function ServiceDefineSharedAPI(const aInterface: TGUID): TServiceFactoryClient;
     /// allow to notify a server the services this client may be actually capable
     // - when this client will connect to a remote server to access its services,
     // it will register its own services, supplying its TSQLRestServer instance,
@@ -18757,7 +19003,7 @@ type
     property LastErrorException: ExceptClass read fLastErrorException;
 
     /// maximum additional retry occurence
-    // - defaut is 0, i.e. will retry once
+    // - defaut is 1, i.e. will retry once
     // - set OnAuthentificationFailed to nil in order to avoid any retry
     property MaximumAuthentificationRetry: Integer
       read fMaximumAuthentificationRetry write fMaximumAuthentificationRetry;
@@ -19061,7 +19307,7 @@ type
   TSQLVirtualTablePreparedConstraint = packed record
     /// Column on left-hand side of constraint
     // - The first column of the virtual table is column 0
-    // - The ROWID of the virtual table is column -1
+    // - The RowID of the virtual table is column -1
     // - Hidden columns are counted when determining the column index
     // - if this field contains VIRTUAL_TABLE_IGNORE_COLUMN (-2), TSQLVirtualTable.
     // Prepare() should ignore this entry
@@ -19092,7 +19338,7 @@ type
   TSQLVirtualTablePreparedOrderBy = record
     /// Column number
     // - The first column of the virtual table is column 0
-    // - The ROWID of the virtual table is column -1
+    // - The RowID of the virtual table is column -1
     // - Hidden columns are counted when determining the column index.
     Column: Integer;
     /// True for DESCending order, false for ASCending order.
@@ -19570,8 +19816,8 @@ function UTF8CompareBoolean(P1,P2: PUTF8Char): PtrInt;
 function UTF8CompareUInt32(P1,P2: PUTF8Char): PtrInt;
 
 /// special comparaison function for sorting sftInteger, sftTID, sftRecordVersion
-// sftTimeLog/sftModTime/sftCreateTime or sftUnixTime UTF-8 encoded values in
-// the SQLite3 database or JSON content
+// sftTimeLog/sftModTime/sftCreateTime or sftUnixTime/sftUnixMSTime UTF-8 encoded
+// values in the SQLite3 database or JSON content
 function UTF8CompareInt64(P1,P2: PUTF8Char): PtrInt;
 
 /// special comparaison function for sorting sftCurrency
@@ -19617,15 +19863,15 @@ const
   /// if a TSQLVirtualTablePreparedConstraint.Column points to the RowID
   VIRTUAL_TABLE_ROWID_COLUMN = -1;
 
-  /// if the TSQLRecordVirtual table kind is a FTS3/FTS4 virtual table
-  IS_FTS = [rFTS3, rFTS4];
+  /// if the TSQLRecordVirtual table kind is a FTS virtual table
+  IS_FTS = [rFTS3, rFTS4, rFTS5];
 
   /// if the TSQLRecordVirtual table kind is not an embedded type
   // - can be set for a TSQLRecord after a VirtualTableExternalRegister call
   IS_CUSTOM_VIRTUAL = [rCustomForcedID, rCustomAutoID];
 
   /// if the TSQLRecordVirtual table kind expects the ID to be set on INSERT
-  INSERT_WITH_ID = [rFTS3, rFTS4, rRTree, rCustomForcedID];
+  INSERT_WITH_ID = [rFTS3, rFTS4, rFTS5, rRTree, rCustomForcedID];
 
   /// Supervisor Table access right, i.e. alllmighty over all fields
   ALL_ACCESS_RIGHTS = [0..MAX_SQLTABLES-1];
@@ -19894,10 +20140,7 @@ type
   // - is the default logging family used by the mORMot framework
   // - mORMotDB.pas unit will set SynDBLog := TSQLLog
   // - mORMotSQLite3.pas unit will set SynSQLite3Log := TSQLLog
-  TSQLLog = class(TSynLog)
-  protected
-    procedure CreateLogWriter; override;
-  end;
+  TSQLLog = TSynLog;
 
 {$ifdef WITHLOG}
 var
@@ -19927,37 +20170,37 @@ uses
 // ************ some RTTI and SQL mapping routines
 
 procedure SetID(P: PUTF8Char; var result: TID);
-{$ifdef HASINLINE}
 {$ifdef CPU64}
 begin // PtrInt is already int64 -> call PtrInt version
   result := GetInteger(P);
 {$else}
+{$ifdef HASINLINENOTX86}
 begin
   {$ifdef VER3_0} // FPC issue woraround
   SetInt64(P,result);
   {$else}
   SetInt64(P,PInt64(@result)^);
   {$endif}
-{$endif}
 {$else}
 asm
         jmp     SynCommons.SetInt64
-{$endif}
+{$endif HASINLINENOTX86}
+{$endif CPU64}
 end;
 
-procedure SetID(const U: RawByteString; var result: TID); overload;
-{$ifdef HASINLINE}
+procedure SetID(const U: RawByteString; var result: TID);
 {$ifdef CPU64}
 begin // PtrInt is already int64 -> call PtrInt version
   result := GetInteger(pointer(U));
 {$else}
+{$ifdef HASINLINENOTX86}
 begin
   SetID(pointer(U),result);
-{$endif}
 {$else}
 asm
         jmp     SynCommons.SetInt64
-{$endif}
+{$endif HASINLINENOTX86}
+{$endif CPU64}
 end;
 
 {$ifdef HASDIRECTTYPEINFO}
@@ -19965,7 +20208,7 @@ type
   Deref = PTypeInfo;
 {$else}
 function Deref(Info: PPTypeInfo): PTypeInfo;
-{$ifdef HASINLINE} inline;
+{$ifdef HASINLINENOTX86} inline;
 begin
   if Info=nil then
     result := pointer(Info) else
@@ -19979,7 +20222,7 @@ asm     // Delphi is so bad at compiling above code...
         ret
 @z:     db      $f3 // rep ret
 end;
-{$endif HASINLINE}
+{$endif HASINLINENOTX86}
 {$endif HASDIRECTTYPEINFO}
 
 
@@ -20287,12 +20530,15 @@ end;
 
 function ClassFieldPropWithParentsFromUTF8(aClassType: TClass; PropName: PUTF8Char;
   PropNameLen: integer): PPropInfo;
-{$ifndef FPC}
+{$ifdef FPC}
+var name: AnsiString;
+{$else}
 var i: integer;
 {$endif}
 begin
   {$ifdef FPC}
-  result := pointer(GetFPCPropInfo(aClassType,PropName));
+  SetString(name,PAnsiChar(PropName),PropNameLen);
+  result := pointer(GetFPCPropInfo(aClassType,name));
   {$else}
   while (PropNameLen<>0) and (aClassType<>nil) do begin
     for i := 1 to InternalClassPropInfo(aClassType,result) do
@@ -20309,14 +20555,43 @@ function ClassFieldPropWithParentsFromClassType(aClassType,aSearchedClassType: T
 var i: integer;
 begin
   if aSearchedClassType<>nil then
-  while aClassType<>nil do begin
-    for i := 1 to InternalClassPropInfo(aClassType,result) do
-      if (result^.PropType^.Kind=tkClass) and
-         (result^.PropType^.ClassType^.ClassType=aSearchedClassType) then
-        exit else
-        result := result^.Next;
-    aClassType := aClassType.ClassParent;
-  end;
+    while aClassType<>nil do begin
+      for i := 1 to InternalClassPropInfo(aClassType,result) do
+        if (result^.PropType^.Kind=tkClass) and
+           (result^.PropType^.ClassType^.ClassType=aSearchedClassType) then
+          exit else
+          result := result^.Next;
+      aClassType := aClassType.ClassParent;
+    end;
+  result := nil;
+end;
+
+function ClassFieldPropWithParentsInheritsFromClassType(aClassType,aSearchedClassType: TClass): PPropInfo;
+var i: integer;
+begin
+  if aSearchedClassType<>nil then
+    while aClassType<>nil do begin
+      for i := 1 to InternalClassPropInfo(aClassType,result) do
+        if (result^.PropType^.Kind=tkClass) and
+           (result^.PropType^.InheritsFrom(aSearchedClassType)) then
+          exit else
+          result := result^.Next;
+      aClassType := aClassType.ClassParent;
+    end;
+  result := nil;
+end;
+
+function ClassFieldPropWithParentsFromClassOffset(aClassType: TClass; aSearchedOffset: pointer): PPropInfo;
+var i: integer;
+begin
+  if aSearchedOffset<>nil then
+    while aClassType<>nil do begin
+      for i := 1 to InternalClassPropInfo(aClassType,result) do
+        if result^.GetFieldAddr(nil)=aSearchedOffset then
+          exit else
+          result := result^.Next;
+      aClassType := aClassType.ClassParent;
+    end;
   result := nil;
 end;
 
@@ -20417,7 +20692,7 @@ begin
   if objClass=nil then
     exit;
   ObjArrayClear(obj);
-  if (arr.Kind<>dvArray) or (arr.Count=0) then
+  if not(dvoIsArray in arr.Options) or (arr.Count=0) then
     exit;
   SetLength(obj,arr.Count);
   for i := 0 to arr.Count-1 do begin
@@ -20553,7 +20828,8 @@ const
      ftInt64,     // sftRecordVersion = TRecordVersion
      ftInt64,     // sftSessionUserID
      ftDate,      // sftDateTimeMS
-     ftInt64);    // sftUnixTime = TUnixTime
+     ftInt64,     // sftUnixTime = TUnixTime
+     ftInt64);    // sftUnixMSTime = TUnixMSTime
 
 function SQLFieldTypeToDBField(aSQLFieldType: TSQLFieldType; aTypeInfo: pointer): TSQLDBFieldType;
   {$ifdef HASINLINE}inline;{$endif}
@@ -20608,7 +20884,8 @@ begin
   GetValueVar(Instance,ToSQL,Result,wasSQLString);
 end;
 
-procedure TSQLPropInfo.SetValueVar(Instance: TObject; const Value: RawUTF8; wasString: boolean);
+procedure TSQLPropInfo.SetValueVar(Instance: TObject; const Value: RawUTF8;
+  wasString: boolean);
 begin
   SetValue(Instance,pointer(Value),wasString);
 end;
@@ -20690,8 +20967,8 @@ const
     {$ifndef NOVARIANTS} varNull, varNull, {$endif} varString, varNull,
  // sftBlobCustom, sftUTF8Custom, sftMany, sftModTime, sftCreateTime, sftTID,
     varString,      varString,    varEmpty, varInt64,  varInt64,     varInt64,
- // sftRecordVersion, sftSessionUserID, sftDateTimeMS, sftUnixTime
-    varInt64, varInt64, varDate, varInt64);
+ // sftRecordVersion, sftSessionUserID, sftDateTimeMS, sftUnixTime, sftUnixMSTime
+    varInt64, varInt64, varDate, varInt64, varInt64);
 var err: integer;
     tmp: TSynTempBuffer;
 begin
@@ -20717,7 +20994,7 @@ begin
   sftEnumerate:
     result.VInteger := GetInteger(Value);
   sftInteger, sftID, sftTID, sftRecord, sftSet, sftRecordVersion, sftSessionUserID,
-  sftTimeLog, sftModTime, sftCreateTime, sftUnixTime:
+  sftTimeLog, sftModTime, sftCreateTime, sftUnixTime, sftUnixMSTime:
     SetInt64(Value,result.VInt64);
   sftAnsiText, sftUTF8Text:
     SetString(RawUTF8(result.VAny),Value,StrLen(Value));
@@ -20883,6 +21160,8 @@ begin
         C := TSQLPropInfoRTTITimeLog;
       sftUnixTime: // specific class for further use
         C := TSQLPropInfoRTTIUnixTime;
+      sftUnixMSTime:
+        C := TSQLPropInfoRTTIUnixMSTime;
       sftCurrency:
         C := TSQLPropInfoRTTICurrency;
       sftDateTime, sftDateTimeMS:
@@ -20912,7 +21191,7 @@ begin
       sftUTF8Custom: // will happen only for DELPHI XE5 and up
         result := TSQLPropInfoCustomJSON.Create(aPropInfo,aPropIndex);
       else
-      case aType^.Kind of // retrieve exact type at binary level
+      case aType^.Kind of // retrieve matched type from RTTI binary level
         tkInteger:
           C := TSQLPropInfoRTTIInt32;
         tkSet:
@@ -21001,6 +21280,13 @@ end;
 
 { TSQLPropInfoRTTIInt32 }
 
+constructor TSQLPropInfoRTTIInt32.Create(aPropInfo: PPropInfo; aPropIndex: integer;
+  aSQLFieldType: TSQLFieldType);
+begin
+  inherited Create(aPropInfo,aPropIndex,aSQLFieldType);
+  fUnsigned := fPropType^.OrdType in [otUByte,otUWord,otULong];
+end;
+
 procedure TSQLPropInfoRTTIInt32.CopySameClassProp(Source: TObject; DestInfo: TSQLPropInfo;
   Dest: TObject);
 begin
@@ -21013,30 +21299,42 @@ begin
 end;
 
 function TSQLPropInfoRTTIInt32.GetHash(Instance: TObject; CaseInsensitive: boolean): cardinal;
+var v: integer;
 begin
-  result := fPropInfo.GetOrdProp(Instance);
+  v := fPropInfo.GetOrdProp(Instance);
+  result := crc32c(0,@v,4); // better hash distribution using crc32c
 end;
 
 procedure TSQLPropInfoRTTIInt32.GetJSONValues(Instance: TObject; W: TJSONSerializer);
+var v: integer;
 begin
-  W.Add(fPropInfo.GetOrdProp(Instance));
+  v := fPropInfo.GetOrdProp(Instance);
+  if fUnsigned then
+    W.AddU(cardinal(v)) else
+    W.Add(v);
 end;
 
 procedure TSQLPropInfoRTTIInt32.GetValueVar(Instance: TObject;
   ToSQL: boolean; var result: RawUTF8; wasSQLString: PBoolean);
+var v: integer;
 begin
   if wasSQLString<>nil then
     wasSQLString^ := false;
-  Int32ToUtf8(fPropInfo.GetOrdProp(Instance),result);
+  v := fPropInfo.GetOrdProp(Instance);
+  if fUnsigned then
+    UInt32ToUtf8(cardinal(v),result) else
+    Int32ToUtf8(v,result);
 end;
 
 procedure TSQLPropInfoRTTIInt32.NormalizeValue(var Value: RawUTF8);
-var err, VInt: integer;
+var err,v: integer;
 begin
-  VInt := GetInteger(pointer(Value),err);
+  v := GetInteger(pointer(Value),err);
   if err<>0 then
     Value := '' else
-    Int32ToUtf8(VInt,Value);
+    if fUnsigned then
+      UInt32ToUtf8(cardinal(v),Value) else
+      Int32ToUtf8(v,Value);
 end;
 
 function TSQLPropInfoRTTIInt32.CompareValue(Item1, Item2: TObject; CaseInsensitive: boolean): PtrInt;
@@ -21074,10 +21372,14 @@ end;
 
 procedure TSQLPropInfoRTTIInt32.GetFieldSQLVar(Instance: TObject; var aValue: TSQLVar;
   var temp: RawByteString);
+var v: integer;
 begin
   aValue.Options := [];
   aValue.VType := ftInt64;
-  aValue.VInt64 := fPropInfo.GetOrdProp(Instance);
+  v := fPropInfo.GetOrdProp(Instance);
+  if fUnsigned then
+    aValue.VInt64 := cardinal(v) else 
+    aValue.VInt64 := v;
 end;
 
 
@@ -21127,7 +21429,7 @@ begin
   i := fPropInfo.GetOrdProp(Instance);
   if (fSQLFieldType=sftBoolean) and not ToSQL then
     JSONBoolean(i<>0,result) else
-    Int32ToUtf8(i,result);
+    UInt32ToUtf8(i,result);
 end;
 
 procedure TSQLPropInfoRTTIEnum.NormalizeValue(var Value: RawUTF8);
@@ -21143,7 +21445,7 @@ begin
         i := 1;
   if cardinal(i)>cardinal(fEnumType^.MaxValue) then
     Value := '' else // only set a valid value
-    Int32ToUtf8(i,Value);
+    UInt32ToUtf8(i,Value);
 end;
 
 procedure TSQLPropInfoRTTIEnum.SetValue(Instance: TObject; Value: PUTF8Char;
@@ -21227,7 +21529,7 @@ begin
   if fPropInfo.GetterIsField then
     I64 := PInt64(fPropInfo.GetterAddr(Instance))^ else
     I64 := fPropInfo.GetInt64Prop(Instance);
-  result := Int64Rec(I64).Lo xor Int64Rec(I64).Hi;
+  result := crc32c(0,@I64,sizeof(I64)); // better hash distribution using crc32c
 end;
 
 procedure TSQLPropInfoRTTIInt64.GetJSONValues(Instance: TObject; W: TJSONSerializer);
@@ -22785,41 +23087,10 @@ end;
 
 function TSQLPropInfoRTTIVariant.GetHash(Instance: TObject;
   CaseInsensitive: boolean): cardinal;
-var Up: array[byte] of AnsiChar; // avoid slow heap allocation
-    value: Variant;
-  procedure ComplexType;
-  var tmp: RawUTF8;
-  begin // slow but always working conversion to string
-    tmp := VariantSaveJSON(value,twNone);
-    if CaseInsensitive then
-      result := crc32c(0,Up,UpperCopy255(Up,tmp)-Up) else
-      result := crc32c(0,pointer(tmp),length(tmp));
-  end;
+var value: Variant;
 begin
   fPropInfo.GetVariantProp(Instance,value);
-  with TVarData(value) do
-  case VType of
-    varNull, varEmpty:
-      result := 0;
-    varSmallint, varWord, varBoolean:
-      result := VWord;
-    varShortInt, varByte:
-      result := VByte;
-    varLongWord, varInteger, varSingle:
-      result := varLongWord;
-    varInt64, varDouble, varDate, varCurrency:
-      result := crc32c(0,@VInt64,sizeof(Int64));
-    varString:
-      if CaseInsensitive then
-        result := crc32c(0,Up,UpperCopy255Buf(Up,VString,length(RawUTF8(VString)))-Up) else
-        result := crc32c(0,VString,length(RawUTF8(VString)));
-    varOleStr {$ifdef HASVARUSTRING}, varUString{$endif}:
-      if CaseInsensitive then
-        result := crc32c(0,Up,UpperCopy255W(Up,VOleStr,StrLenW(VOleStr))-Up) else
-        result := crc32c(0,VAny,StrLenW(VOleStr)*2);
-  else
-    ComplexType;
-  end;
+  result := VariantHash(value,CaseInsensitive);
 end;
 
 procedure TSQLPropInfoRTTIVariant.GetJSONValues(Instance: TObject;
@@ -23502,7 +23773,7 @@ function TSQLPropInfoList.IndexByNameOrExcept(const aName: RawUTF8): integer;
 begin
   if IsRowID(pointer(aName)) then
     result := -1 else begin
-    result := IndexByName(pointer(aName)); // fast binary search
+    result := IndexByName(pointer(aName)); // fast O(log(n)) binary search
     if result<0 then
       raise EORMException.CreateUTF8(
         '%.IndexByNameOrExcept(%): unkwnown field in %',[self,aName,fTable]);
@@ -23533,10 +23804,10 @@ function TSQLPropInfoList.IndexByNameUnflattenedOrExcept(const aName: RawUTF8): 
 begin
   if pilSubClassesFlattening in fOptions then begin
     for result := 0 to Count-1 do
-      if IdemPropNameU(List[result].NameUnflattened,aName) then
+      if IdemPropNameU(List[result].NameUnflattened,aName) then // O(n) iteration
         exit;
   end else begin
-    result := IndexByName(pointer(aName)); // faster binary search
+    result := IndexByName(pointer(aName)); // faster O(log(n)) binary search
     if result>=0 then
       exit;
   end;
@@ -23592,6 +23863,15 @@ begin
   result := (Code>=HTTP_SUCCESS) and (Code<HTTP_BADREQUEST); // 200..399
 end;
 
+function AuthURI(const URI, URIAuthenticationBearer: RawUTF8): RawUTF8;
+begin
+  if URIAuthenticationBearer='' then
+    result := URI else
+    if PosEx('?',URI)=0 then
+      result := URI+'?authenticationbearer='+URIAuthenticationBearer else
+      result := URI+'&authenticationbearer='+URIAuthenticationBearer
+end;
+
 function StringToMethod(const method: RawUTF8): TSQLURIMethod;
 const NAME: array[mGET..high(TSQLURIMethod)] of string[11] = ( // sorted by occurence
   'GET','POST','PUT','DELETE','HEAD','BEGIN','END','ABORT','LOCK','UNLOCK','STATE',
@@ -23608,6 +23888,16 @@ begin
   result := mNone;
 end;
 
+function IsInvalidHttpHeader(head: PUTF8Char; headlen: integer): boolean;
+var i: integer;
+begin
+  result := true;
+  for i := 0 to headlen-3 do
+    if (PInteger(head+i)^=$0a0d0a0d) or
+       (PWord(head+i)^=$0d0d) or (PWord(head+i)^=$0a0a) then
+      exit;
+  result := false;
+end;
 
 
 { ******************* process monitoring / statistics }
@@ -23657,7 +23947,7 @@ function TSynMonitorUsage.Track(Instance: TObject; const Name: RawUTF8): integer
           p^.Kind := k;
           ShortStringToAnsi7String(nfo^.Name,p^.Name);
           if (parent<>nil) and (FindPropName(['Bytes','MicroSec'],p^.Name)>=0) then
-            p^.Name := RawUTF8(parent.ClassName); // meaningful property name
+            ToText(parent,p^.Name); // meaningful property name
           for g := low(p^.Values) to high(p^.Values) do
             SetLength(p^.Values[g],USAGE_VALUE_LEN[g]);
           if k in SYNMONITORVALUE_CUMULATIVE then
@@ -23680,7 +23970,7 @@ begin
     instanceName := TSynMonitor(Instance).Name else
     instanceName := Name;
   if instanceName='' then
-    instanceName := RawUTF8(Instance.ClassName);
+    ToText(instance.ClassType,instanceName);
   fSafe.Lock;
   try
     n := length(fTracked);
@@ -23899,7 +24189,7 @@ begin // fValues[] variants -> fTracked[].Props[].Values[]
       for p := 0 to length(Track.Props)-1 do
         with Track.Props[p] do
         if val^.GetAsDocVariant(Name,int) and
-           (int^.Count>0) and (int^.Kind=dvArray) then begin
+           (int^.Count>0) and (dvoIsArray in int^.Options) then begin
           for v := 0 to length(Values[g])-1 do
             if v<int^.Count then
               Values[g][v] := VariantToInt64Def(int^.Values[v],0);
@@ -24289,7 +24579,7 @@ begin
   FillcharFast(Bits,(RowCount shr 3)+1,0);
   if IDs=nil then
     exit; // no selected -> all bits left to 0
-  // we sort IDs to use FastFindIntegerSorted() and its fast binary search
+  // we sort IDs to use FastFindIntegerSorted() and its O(log(n)) binary search
   ID := @IDs[0];
   IDn := high(IDs);
   QuickSortInt64(ID,0,IDn);
@@ -24319,7 +24609,7 @@ begin
   assert(comparemem(@AllID[0],@IDs[0],length(AllID)*sizeof(TID))); }
 end;
 
-function TSQLTable.RowFromID(aID: TID): integer;
+function TSQLTable.RowFromID(aID: TID; aNotFoundMinusOne: boolean): integer;
 var ID: RawUTF8;
     FID: integer;
     U: PPUTF8Char;
@@ -24346,13 +24636,17 @@ begin
       end;
     end;
   end;
-  result := fRowCount; // not found -> return last row index
+  if aNotFoundMinusOne then
+    result := -1 else
+    result := fRowCount; // not found -> return last row index
 end;
 
-procedure TSQLTable.DeleteRow(Row: integer);
+function TSQLTable.DeleteRow(Row: integer): boolean;
 begin
-  if (self=nil) or (Row<1) or (Row>fRowCount) then
+  if (self=nil) or (Row<1) or (Row>fRowCount) then begin
+    result := false;
     exit; // out of range
+  end;
   if Assigned(fIDColumn) then
     if Row<fRowCount then
       MoveFast(fIDColumn[Row+1],fIDColumn[Row],(fRowCount-Row)*sizeof(PUTF8Char));
@@ -24361,6 +24655,7 @@ begin
     MoveFast(fResults[Row+FieldCount],fResults[Row],(fRowCount*FieldCount-Row)*sizeof(pointer));
   end;
   dec(fRowCount);
+  result := true;
 end;
 
 procedure TSQLTable.InitFieldNames;
@@ -24410,13 +24705,25 @@ begin
         exit;
       end;
     end else
-    if expandTimeLogAsText and
-       (ContentType in [sftTimeLog,sftModTime,sftCreateTime,sftUnixTime]) then begin
+    if expandTimeLogAsText then
+    case ContentType of
+    sftTimeLog,sftModTime,sftCreateTime,sftUnixTime: begin
       SetInt64(V,t.Value);
-      if ContentType=sftUnixTime then
-        t.FromUnixTime(t.Value);
-      value := _ObjFast(['Time',t.Text(true),'Value',PInt64(@t)^]);
+      if t.Value=0 then
+        value := 0 else begin
+        if ContentType=sftUnixTime then
+          t.FromUnixTime(t.Value);
+        value := _ObjFast(['Time',t.Text(true),'Value',t.Value]);
+      end;
       exit;
+    end;
+    sftUnixMSTime: begin // no TTimeLog use for milliseconds resolution
+      SetInt64(V,t.Value);
+      if t.Value=0 then
+        value := 0 else
+        value := _ObjFast(['Time',UnixMSTimeToString(t.Value),'Value',t.Value]);
+      exit;
+    end;
     end;
     ValueVarToVariant(V,ContentType,TVarData(value),true,ContentTypeInfo,options);
   end;
@@ -24468,17 +24775,20 @@ end;
 
 {$endif NOVARIANTS}
 
-procedure TSQLTable.DeleteColumnValues(Field: integer);
+function TSQLTable.DeleteColumnValues(Field: integer): boolean;
 var i: integer;
     U: PPUTF8Char;
 begin
-  if cardinal(Field)>=cardinal(FieldCount) then
+  if cardinal(Field)>=cardinal(FieldCount) then begin
+    result := false;
     exit; // out of range
+  end;
   U := @fResults[Field+FieldCount];  // U^ = column UTF-8 content for this field
   for i := 1 to fRowCount do begin
     U^ := nil; // just void UTF-8 content text
     inc(U,FieldCount);
   end;
+  result := true;
 end;
 
 function TSQLTable.GetQueryTableNameFromSQL: RawUTF8;
@@ -24775,6 +25085,8 @@ begin
     result := TimeLogToDateTime(GetInt64(P));
   sftUnixTime:
     result := UnixTimeToDateTime(GetInt64(P));
+  sftUnixMSTime: 
+    result := UnixMSTimeToDateTime(GetInt64(P));
   else // sftDateTime and any other kind will try from ISO-8601 text
     result := Iso8601ToDateTimePUTF8Char(P);
   end;
@@ -25104,7 +25416,7 @@ begin
         if Expand then
           W.AddString(W.ColNames[F]); // '"'+ColNames[]+'":'
         if Assigned(OnExportValue) then
-          W.AddString(OnExportValue(self,R,F)) else
+          W.AddString(OnExportValue(self,R,F,false)) else
         if U^=nil then
           W.AddShort('null') else
         // IsStringJSON() is fast and safe: no need to guess exact value type
@@ -25164,7 +25476,7 @@ begin
     for R := RowFirst to RowLast do
       for F := 0 to FMax do begin
         if Assigned(OnExportValue) then
-          W.AddString(OnExportValue(self,R,F)) else
+          W.AddString(OnExportValue(self,R,F,false)) else
         if Tab or not IsStringJSON(U^) then
           W.AddNoJSONEscape(U^,StrLen(U^)) else begin
           W.Add('"');
@@ -25366,16 +25678,18 @@ begin
                   W.AddShort('string');
                 end;
                 W.AddShort('"><text:p>');
-                if fieldType[F] in [ftUTF8, ftBlob] then
+                if fieldType[F] in [ftUnknown, ftUTF8, ftBlob] then
                   W.AddXmlEscape(U^);
                 W.AddShort('</text:p></table:table-cell>');
                 inc(U); // points to next value
               end;
-            end else begin
-              W.AddShort('<table:table-cell office:value-type="string"><text:p>');
-              W.AddXmlEscape(U^);
-              W.AddShort('</text:p></table:table-cell>');
-            end;
+            end else
+              for F := 0 to FieldCount-1 do begin
+                W.AddShort('<table:table-cell office:value-type="string"><text:p>');
+                W.AddXmlEscape(U^);
+                W.AddShort('</text:p></table:table-cell>');
+                inc(U);
+              end;
             W.AddShort('</table:table-row>');
           end;
         end;
@@ -25419,7 +25733,7 @@ begin
         Dest.AddShort('<th>') else
         Dest.AddShort('<td>');
       if Assigned(OnExportValue) and (R>0) then
-        Dest.AddHtmlEscapeUTF8(OnExportValue(self,R,F),hfOutsideAttributes) else
+        Dest.AddHtmlEscapeUTF8(OnExportValue(self,R,F,true),hfOutsideAttributes) else
         Dest.AddHtmlEscape(U^,hfOutsideAttributes);
       if R=0 then
         Dest.AddShort('</th>') else
@@ -25652,7 +25966,8 @@ var
     UTF8CompareInt64,    // TRecordVersion
     UTF8CompareInt64,    // TSessionUserID
     UTF8CompareISO8601,  // TDateTimeMS
-    UTF8CompareInt64);   // TUnixTime
+    UTF8CompareInt64,    // TUnixTime
+    UTF8CompareInt64);   // TUnixMSTime
 
 type
   /// a static object is used for smaller recursive stack size and faster code
@@ -25665,7 +25980,6 @@ type
   TUTF8QuickSort = {$ifndef ISDELPHI2010}object{$else}record{$endif}
   public
     // sort parameters
-    fComp: TUTF8Compare;
     Results: PPUtf8CharArray;
     IDColumn: PPUtf8CharArray;
     Params: TSQLTableSortParams;
@@ -25703,7 +26017,7 @@ end;
 function TUTF8QuickSort.CompI: integer;
 var i64: Int64;
 begin
-  result := fComp(CI^,PP^);
+  result := Params.Comp(CI^,PP^);
   if result=0 then begin
     // same value -> sort by ID
     if Assigned(IDColumn) then
@@ -25719,7 +26033,7 @@ end;
 function TUTF8QuickSort.CompJ: integer;
 var i64: Int64;
 begin
-  result := fComp(CJ^,PP^);
+  result := Params.Comp(CJ^,PP^);
   if result=0 then begin
     // same value -> sort by ID
     if Assigned(IDColumn) then
@@ -25779,7 +26093,7 @@ procedure TUTF8QuickSort.QuickSort(L, R: Integer);
 // code below is very fast and optimized
 var P: PtrInt;
 begin
-  if @fComp<>nil then
+  if @Params.Comp<>nil then
   repeat
     I := L;
     CI := @Results[I*Params.FieldCount+Params.FieldIndex];
@@ -25861,13 +26175,13 @@ begin
     exit;
   if FieldType=sftUnknown then // guess the field type from first row
     FieldType := self.FieldType(Field,nil);
+  // store sorting parameters for re-sort in TSQLTableJSON.FillFrom()
   if Assigned(CustomCompare) then
-    Sort.fComp := CustomCompare else begin
-    Sort.fComp := SQLFieldTypeComp[FieldType];
-    if @Sort.fComp=nil then
+    fSortParams.Comp := CustomCompare else begin
+    fSortParams.Comp := SQLFieldTypeComp[FieldType];
+    if @fSortParams.Comp=nil then
       exit;
   end;
-  // store sorting parameters for resort in TSQLTableJSON.FillFrom()
   fSortParams.FieldType := FieldType;
   fSortParams.FieldCount := FieldCount;
   fSortParams.FieldIndex := Field;
@@ -25888,6 +26202,33 @@ begin
     Sort.QuickSort(1,fRowCount); // ignore first row = field names -> (1,RowCount)
   if PCurrentRow<>nil then
     PCurrentRow^ := Sort.CurrentRow;
+end;
+
+function TSQLTable.SearchFieldSorted(const aValue: RawUTF8; FieldIndex: integer;
+  CustomCompare: TUTF8Compare): integer;
+var L,R,cmp: integer;
+begin
+  if (self<>nil) and (aValue<>'') and (fRowCount>0) and (FieldIndex<>fFieldIndexID) and
+     (cardinal(FieldIndex)<cardinal(fFieldCount)) then begin
+    if not Assigned(CustomCompare) then
+      CustomCompare := fSortParams.Comp;
+    if Assigned(CustomCompare) then begin // fast binary search
+      L := 1;
+      R := fRowCount;
+      repeat
+        result := (L+R) shr 1;
+        cmp := CustomCompare(fResults[result*fFieldCount+FieldIndex],pointer(aValue));
+        if cmp=0 then
+          exit;
+        if cmp<0 then
+          L := result+1 else
+          R := result-1;
+      until L>R;
+      result := 0;
+    end else
+      result := SearchFieldEquals(aValue, FieldIndex);
+  end else
+    result := 0;
 end;
 
 type
@@ -26119,7 +26460,7 @@ begin
   try
     R.FillPrepare(self);
     DestList.Count := fRowCount;       // faster than manual Add()
-    Row := @fResults[FieldCount];     // Row^ points to first row of data
+    Row := @fResults[FieldCount];      // Row^ points to first row of data
     for i := 0 to fRowCount-1 do begin // TObjectList will free each instance
       DestList.List[i] := RecordType.Create;
       R.fFill.Fill(pointer(Row),TSQLRecord(DestList.List[i]));
@@ -26238,6 +26579,20 @@ end;
 function TSQLTable.FieldAsFloat(const FieldName: RawUTF8): TSynExtended;
 begin
   result := GetExtended(FieldBuffer(FieldName));
+end;
+
+function TSQLTable.FieldAsRawUTF8(FieldIndex: Integer): RawUTF8;
+var buf: PUTF8Char;
+begin
+  buf := FieldBuffer(FieldIndex);
+  SetString(result,PAnsiChar(buf),StrLen(buf));
+end;
+
+function TSQLTable.FieldAsRawUTF8(const FieldName: RawUTF8): RawUTF8;
+var buf: PUTF8Char;
+begin
+  buf := FieldBuffer(FieldName);
+  SetString(result,PAnsiChar(buf),StrLen(buf));
 end;
 
 {$ifndef NOVARIANTS}
@@ -26511,12 +26866,16 @@ begin
     exit;
   end;
   // special cases: conversion from INTEGER to text before search
-  if Kind in [sftTimeLog,sftModTime,sftCreateTime,sftUnixTime] then
+  if Kind in [sftTimeLog,sftModTime,sftCreateTime,sftUnixTime,sftUnixMSTime] then
     while cardinal(result)<=cardinal(fRowCount) do begin
       SetInt64(U^,Val64);
       if Val64<>0 then begin
-        if Kind=sftUnixTime  then
+        case Kind of
+        sftUnixTime:
           ValTimeLog.FromUnixTime(Val64);
+        sftUnixMSTime: // seconds resolution is enough for value search
+          ValTimeLog.FromUnixMSTime(Val64);
+        end;      
         tmp[ValTimeLog.Text(tmp,true,' ')] := #0;
         if FindAnsi(tmp,Search) then
           exit;
@@ -26665,6 +27024,7 @@ var EnumType: PEnumType;
     err: integer;
     Value: Int64;
     ValueTimeLog: TTimeLogBits absolute Value;
+    ValueDateTime: TDateTime;
     Ref: RecordRef absolute Value;
 label IsDateTime;
 begin // Text was already forced to '' because was defined as "out" parameter
@@ -26719,7 +27079,7 @@ IsDateTime:
         Text := '';
     end;
   sftEnumerate, sftSet, sftRecord, sftID, sftTID, sftRecordVersion, sftSessionUserID,
-  sftTimeLog, sftModTime, sftCreateTime, sftUnixTime: begin
+  sftTimeLog, sftModTime, sftCreateTime, sftUnixTime, sftUnixMSTime: begin
     Value := GetInt64(Get(Row,Field),err);
     if err<>0 then
       // not an integer -> to be displayed as sftUTF8Text
@@ -26735,6 +27095,19 @@ IsDateTime:
         ValueTimeLog.FromUnixTime(Value);
         goto IsDateTime;
       end;
+      sftUnixMSTime: 
+        if Value<>0 then begin
+          ValueDateTime := UnixMSTimeToDateTime(Value);
+          {$ifndef LVCL}
+          if CustomFormat<>'' then begin
+            Text := FormatDateTime(CustomFormat,ValueDateTime);
+            if Text<>CustomFormat then
+              exit; // valid conversion
+          end;
+          {$endif LVCL}
+          Text := DateTimeToi18n(ValueDateTime);
+          exit;
+        end;
 {      sftID, sftTID, sftSet, sftRecordVersion:
         result := sftUTF8Text; // will display INTEGER field as number }
       sftRecord:
@@ -27314,8 +27687,8 @@ begin
     while P^<>'[' do if P^=#0 then exit else inc(P); // need an array of objects
     repeat inc(P); if P^=#0 then exit; until P^='{'; // go to object begining
   end;
-  GetJSONPropName(P); // ignore field name
-  result := GetJSONField(P,P); // get field value
+  if GetJSONPropName(P)<>nil then // ignore field name
+    result := GetJSONField(P,P); // get field value
 end;
 
 function IsNotAjaxJSON(P: PUTF8Char): Boolean;
@@ -27695,7 +28068,7 @@ begin
     if WithSection then
       // new TObject.ClassName is UnicodeString (Delphi 20009) -> inline code with
       // vmtClassName = UTF-8 encoded text stored in a shortstring = -44
-      Add(#13'[%]'#13,[PShortString(PPointer(PPtrInt(Value)^+vmtClassName)^)^]);
+      Add(#13'[%]'#13,[ClassNameShort(Value)^]);
     for i := 1 to InternalClassPropInfo(Value.ClassType,P) do begin
       case P^.PropType^.Kind of
         tkInt64{$ifdef FPC}, tkQWord{$endif}:
@@ -27946,7 +28319,7 @@ procedure TPropInfo.SetLongStrValue(Instance: TObject; const Value: RawUTF8);
     // an FPC quirck ... and Alf work-around ... ;-)
     if cp=CP_UTF16 then begin
       Setlength(tmp,length(tmp)+1);
-      tmp[length(tmp)]:=#0;
+      tmp[length(tmp)] := #0;
     end;
     {$endif}
     SetLongStrProp(Instance,tmp);
@@ -28425,7 +28798,7 @@ begin
 end;
 
 function TPropInfo.GetterAddr(Instance: pointer): pointer;
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 begin
   result := Pointer(PtrInt(Instance)+GetProc{$ifndef FPC} and $00FFFFFF{$endif});
 end;
@@ -28443,7 +28816,7 @@ begin
 end;
 
 function TPropInfo.TypeInfo: PTypeInfo;
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 begin
   {$ifndef HASDIRECTTYPEINFO}
   if PropType<>nil then
@@ -28460,7 +28833,7 @@ asm // Delphi is so bad at compiling above code...
         ret
 @z:     db      $f3 // rep ret
 end;
-{$endif HASINLINE}
+{$endif HASINLINENOTX86}
       
 {$ifdef FPC_OR_PUREPASCAL}
 function TPropInfo.Next: PPropInfo;
@@ -28468,7 +28841,7 @@ begin
   result := AlignToPtr(@Name[ord(Name[0])+1]);
 end;
 {$else}
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 function TPropInfo.Next: PPropInfo;
 begin
   result := @Name[ord(Name[0])+1];
@@ -28479,7 +28852,7 @@ asm     // very fast code
         movzx   edx, byte ptr[eax].TPropInfo.Name
         lea     eax, [eax + edx].TPropInfo.Name[1]
 end;
-{$endif HASINLINE}
+{$endif HASINLINENOTX86}
 {$endif FPC_OR_PUREPASCAL}
 
 {$ifdef USETYPEINFO}
@@ -29155,18 +29528,16 @@ type
 
 { TTypeInfo }
 
-{$ifdef HASINLINE}
 function TTypeInfo.ClassType: PClassType;
+{$ifdef HASINLINENOTX86}
 begin
   result := AlignTypeData(@Name[ord(Name[0])+1]);
-end;
 {$else}
-function TTypeInfo.ClassType: PClassType;
 asm // very fast code
         movzx   edx, byte ptr[eax].TTypeInfo.Name
         lea     eax, [eax + edx].TTypeInfo.Name[1]
-end;
 {$endif}
+end;
 
 function TTypeInfo.ClassCreate: TObject;
 var instance: TClassInstance;
@@ -29176,7 +29547,7 @@ begin
 end;
 
 function TTypeInfo.RecordType: PRecordType;
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 begin
   result := AlignTypeData(@Name[ord(Name[0])+1]);
 {$else}
@@ -29193,17 +29564,19 @@ end;
 
 function TTypeInfo.ClassSQLFieldType: TSQLFieldType;
 var CT: PClassType;
-    C,C2: TClass;
+    C: TClass;
 begin
   CT := AlignTypeData(@Name[ord(Name[0])+1]); // inlined ClassType
   C := CT^.ClassType;
-  C2 := C;
+  result := sftUnknown;
   while true do // unrolled several InheritsFrom() calls
     if C<>TSQLRecordMany then
     if C<>TSQLRecord then
     if (C<>TRawUTF8List) and (C<>TStrings) and
        (C<>TObjectList) {$ifndef LVCL}and (C<>TCollection){$endif} then
       if CT^.ParentInfo<>nil then begin
+        if CT^.PropCount>0 then
+          result := sftObject; // identify any class with published properties
         with Deref(CT^.ParentInfo)^ do
           CT := AlignTypeData(@Name[ord(Name[0])+1]); // get parent ClassType
         C := CT^.ClassType;
@@ -29212,18 +29585,15 @@ begin
           break;
       end else break
     else begin
-      result := sftObject; // TStrings, TRawUTF8List or TCollection
-      exit;
+      result := sftObject; // TStrings,TObjectList,TRawUTF8List or TCollection
+      break;
     end else begin
       result := sftID; // TSQLRecord field is pointer(RecordID), not an Instance
-      exit;
+      break;
     end else begin
       result := sftMany; // no data is stored here, but in a pivot table
-      exit;
+      break;
     end;
-  if ClassHasPublishedFields(C2) then
-    result := sftObject else // identify any class with published properties
-    result := sftUnknown;
 end;
 
 function TTypeInfo.InheritsFrom(AClass: TClass): boolean;
@@ -29285,6 +29655,10 @@ begin // very fast, thanks to the TypeInfo() compiler-generated function
       end else
       if @self=TypeInfo(TUnixTime) then begin
         result := sftUnixTime;
+        exit;
+      end else
+      if @self=TypeInfo(TUnixMSTime) then begin
+        result := sftUnixMSTime;
         exit;
       end else
       if @self=TypeInfo(TID) then begin
@@ -29423,7 +29797,7 @@ begin
   if (base<>nil) and (base<>@self) then // no redirection if already the base type
     result := PEnumType(GetFPCTypeData(pointer(DeRef(base))));
 {$else}
-{$ifdef HASINLINE}
+{$ifdef HASINLINENOTX86}
 begin
   with PEnumType(@Name[ord(Name[0])+1])^.BaseType^^ do
     result := @Name[ord(Name[0])+1];
@@ -30091,6 +30465,42 @@ begin
     result := 'SELECT '+SimpleFields  else
     result := 'SELECT '+Select;
   result := result+' FROM '+TableName+SQLFromWhere(Where);
+end;
+
+function SelectInClause(const PropName: RawUTF8; const Values: array of RawUTF8;
+  const Suffix: RawUTF8; ValuesInlined: boolean): RawUTF8;
+var i: integer;
+begin
+  if high(Values)>=0 then
+    with TTextWriter.CreateOwnedStream do
+    try
+      AddString(PropName);
+      if high(Values)=0 then begin
+        if ValuesInlined then
+          AddShort('=:(') else
+          Add('=');
+        AddQuotedStr(pointer(Values[0]),'"');
+        if ValuesInlined then
+          AddShort('):');
+      end else begin
+        AddShort(' in (');
+        for i := 0 to high(Values) do begin
+          if ValuesInlined then
+            Add(':','(');
+          AddQuotedStr(pointer(Values[i]),'"');
+          if ValuesInlined then
+            AddShort('):,') else
+            Add(',');
+        end;
+        CancelLastComma;
+        Add(')');
+      end;
+      AddString(Suffix);
+      SetText(result);
+    finally
+      Free;
+    end else
+    result := '';
 end;
 
 
@@ -30946,9 +31356,11 @@ end;
 class function TSQLRecord.GetSQLCreate(aModel: TSQLModel): RawUTF8;
 // not implemented in TSQLRecordProperties since has been made virtual
 var i: integer;
-    SQL: RawUTF8;
+    c: TClass;
+    SQL, cname, tokenizer: RawUTF8;
     M: TSQLVirtualTableClass;
     Props: TSQLModelRecordProperties;
+    fields: TSQLPropInfoList;
 begin
   if aModel=nil then
     raise EModelException.CreateUTF8('Invalid %.GetSQLCreate(nil) call',[self]);
@@ -30957,10 +31369,9 @@ begin
     // create a FTS3/FTS4/RTREE virtual table
     result := 'CREATE VIRTUAL TABLE '+SQLTableName+' USING ';
     case Props.Kind of
-    rFTS3:
-      result := result+'fts3(';
-    rFTS4:
-      result := result+'fts4(';
+    rFTS3:  result := result+'fts3(';
+    rFTS4:  result := result+'fts4(';
+    rFTS5:  result := result+'fts5(';
     rRTree: result := result+'rtree(RowID,';
     rCustomForcedID, rCustomAutoID: begin
       M := aModel.VirtualTableModule(self);
@@ -30973,36 +31384,42 @@ begin
       result := result+GetVirtualTableSQLCreate(Props.Props);
     end;
     end;
-    with Props.Props.Fields do
+    fields := Props.Props.Fields;
     case Props.Kind of
-    rFTS3, rFTS4: begin
+    rFTS3, rFTS4, rFTS5: begin
       if (Props.fFTSWithoutContentFields<>'') and (Props.fFTSWithoutContentTableIndex>=0) then
         result := result+'content="'+aModel.Tables[Props.fFTSWithoutContentTableIndex].
           SQLTableName+'",';
-      if Count=0 then
+      if fields.Count=0 then
         raise EModelException.CreateUTF8(
           'Virtual FTS class % should have published properties',[self]);
-      for i := 0 to Count-1 do
-        with List[i] do
+      for i := 0 to fields.Count-1 do
+        with fields.List[i] do
         if SQLFieldTypeStored<>sftUTF8Text then
           raise EModelException.CreateUTF8('%.%: FTS3/FTS4 field must be RawUTF8',
             [self,Name]) else
           result := result+Name+',';
-      if InheritsFrom(TSQLRecordFTS3Porter) or
-         InheritsFrom(TSQLRecordFTS4Porter) then
-        result := result+' tokenize=porter)' else
-      if InheritsFrom(TSQLRecordFTS3Unicode61) or
-         InheritsFrom(TSQLRecordFTS4Unicode61) then
-        result := result+' tokenize=unicode61)' else
-        result := result+' tokenize=simple)';
+      tokenizer := 'simple';
+      c := self;
+      repeat
+        ToText(c,cname); // TSQLFTSTest = class(TSQLRecordFTS3Porter)
+        if IdemPChar(pointer(cname),'TSQLRECORDFTS') and
+           (cname[14] in ['3','4','5']) then begin
+          if length(cname)>14 then
+            tokenizer := copy(cname,15,100); // e.g. TSQLRecordFTS3Porter -> 'Porter'
+          break;
+        end;
+        c := c.ClassParent;
+      until c=TSQLRecord;
+      result := FormatUTF8('% tokenize=%)',[result,LowerCaseU(tokenizer)]);
     end;
     rRTree: begin
-      if (Count<2) or (Count>RTREE_MAX_DIMENSION*2) or
-         (Count and 2<>0) then
+      if (fields.Count<2) or (fields.Count>RTREE_MAX_DIMENSION*2) or
+         (fields.Count and 2<>0) then
         raise EModelException.CreateUTF8('% has % fields: RTREE expects 2,4,6..%',
-          [self,Count,RTREE_MAX_DIMENSION*2]);
-      for i := 0 to Count-1 do
-        with List[i] do
+          [self,fields.Count,RTREE_MAX_DIMENSION*2]);
+      for i := 0 to fields.Count-1 do
+        with fields.List[i] do
         if SQLFieldTypeStored<>sftFloat then
           raise EModelException.CreateUTF8('%.%: RTREE field must be double',[self,Name]) else
           result := result+Name+',';
@@ -31014,7 +31431,7 @@ begin
     result := 'CREATE TABLE '+SQLTableName+
       '(ID INTEGER PRIMARY KEY AUTOINCREMENT, ';
     // we always add an ID field which is an INTEGER PRIMARY KEY
-    // column, as it is always created (as hidden ROWID) by the SQLite3 engine
+    // column, as it is always created (as hidden RowID) by the SQLite3 engine
     with Props.Props do
     for i := 0 to Fields.Count-1 do
     with Fields.List[i] do begin
@@ -31316,6 +31733,15 @@ var aTable: TSQLTable;
 begin
   Create;
   aTable := TSQLTableJSON.CreateFromTables([RecordClass],'',aJSON);
+  aTable.OwnerMustFree := true;
+  FillPrepare(aTable);
+end;
+
+constructor TSQLRecord.CreateAndFillPrepare(aJSON: PUTF8Char; aJSONLen: integer);
+var aTable: TSQLTable;
+begin
+  Create;
+  aTable := TSQLTableJSON.CreateFromTables([RecordClass],'',aJSON,aJSONLen);
   aTable.OwnerMustFree := true;
   FillPrepare(aTable);
 end;
@@ -31678,6 +32104,12 @@ begin
     result := fFill.FillCurrentRow;
 end;
 
+function TSQLRecord.GetFillReachedEnd: boolean;
+begin
+  result := (self=nil) or (fFill=nil) or (fFill.Table.fRowCount=0) or 
+   (cardinal(fFill.FillCurrentRow)>cardinal(fFill.Table.fRowCount));
+end;
+
 function TSQLRecord.GetTable: TSQLTable;
 begin
   if (self=nil) or (fFill=nil) then
@@ -31716,8 +32148,9 @@ end;
 
 procedure TSQLRecord.GetAsDocVariant(withID: boolean;
   const withFields: TSQLFieldBits; var result: variant; options: PDocVariantOptions);
-var f: integer;
+var f,i: integer;
     Fields: TSQLPropInfoList;
+    intvalues: TRawUTF8Interning;
     doc: TDocVariantData absolute result;
 begin
   VarClear(result);
@@ -31725,13 +32158,21 @@ begin
     exit;
   Fields := RecordProps.Fields;
   doc.InitFast(Fields.Count+1,dvObject);
-  if options<>nil then // force options
+  intvalues := nil;
+  if options<>nil then begin // force options
     PDocVariantData(@result)^.Options := options^;
+    if dvoInternValues in options^ then
+      intvalues := DocVariantType.InternValues;
+  end;
   if withID then
     doc.Values[doc.InternalAdd('RowID')] := fID;
   for f := 0 to Fields.Count-1 do
-  if f in withFields then
-    Fields.List[f].GetVariant(self,doc.Values[doc.InternalAdd(Fields.List[f].Name)]);
+  if f in withFields then begin
+    i := doc.InternalAdd(Fields.List[f].Name);
+    Fields.List[f].GetVariant(self,doc.Values[i]);
+    if intvalues<>nil then
+      intvalues.UniqueVariant(doc.Values[i]);
+  end;
 end;
 
 function TSQLRecord.GetSimpleFieldsAsDocVariant(withID: boolean;
@@ -32337,8 +32778,8 @@ end;
 procedure TSQLModelRecordProperties.SetKind(Value: TSQLRecordVirtualKind);
 function IntSQLTableSimpleFields(withID, withTableName: boolean): RawUTF8;
 const IDComma: array[TSQLRecordVirtualKind] of rawUTF8 =
-  ('ID,','RowID,','RowID,','RowID,','RowID,','RowID,');
-// rSQLite3, rFTS3, rFTS4, rRTree, rCustomForcedID, rCustomAutoID
+  ('ID,','RowID,','RowID,','RowID,','RowID,','RowID,','RowID,');
+// rSQLite3, rFTS3, rFTS4, rFTS5, rRTree, rCustomForcedID, rCustomAutoID
 var TableName: RawUTF8;
     i: integer;
 begin
@@ -32383,8 +32824,8 @@ procedure TSQLModelRecordProperties.FTS4WithoutContent(ContentTable: TSQLRecordC
 var i: integer;
     field: RawUTF8;
 begin
-  if Kind<>rFTS4 then
-    raise EModelException.CreateUTF8('FTS4WithoutContent: % is not a FTS4 table',[Props.Table]);
+  if not(Kind in [rFTS4,rFTS5]) then
+    raise EModelException.CreateUTF8('FTS4WithoutContent: % is not a FTS4/5 table',[Props.Table]);
   fFTSWithoutContentTableIndex := fModel.GetTableIndexExisting(ContentTable);
   for i := 0 to Props.Fields.Count-1 do begin
     field := Props.Fields.List[i].Name;
@@ -32451,6 +32892,8 @@ begin
   if (cardinal(aIndex)>cardinal(fTablesMax)) or (fTableProps[aIndex]<>nil) then
     raise EModelException.Create('TSQLModel.SetTableProps');
   Table := fTables[aIndex];
+  if Table.InheritsFrom(TSQLRecordFTS5) then
+    Kind := rFTS5 else
   if Table.InheritsFrom(TSQLRecordFTS4) then
     Kind := rFTS4 else
   if Table.InheritsFrom(TSQLRecordFTS3) then
@@ -32845,7 +33288,7 @@ end;
 function TSQLModel.GetTableIndex(const SQLTableName: RawUTF8): integer;
 begin
   if (self<>nil) and (SQLTableName<>'') then begin
-    // fast binary search
+    // fast O(log(n)) binary search
     result := FastFindPUTF8CharSorted(
       pointer(fSortedTablesName),fTablesMax,pointer(SQLTableName),@StrIComp);
     if result>=0 then
@@ -32857,7 +33300,7 @@ end;
 function TSQLModel.GetTableIndex(SQLTableName: PUTF8Char): integer;
 begin
   if (self<>nil) and (SQLTableName<>nil) then begin
-    // fast binary search
+    // fast O(log(n)) binary search
     result := FastFindPUTF8CharSorted(
       pointer(fSortedTablesName),fTablesMax,SQLTableName,@StrIComp);
     if result>=0 then
@@ -33307,18 +33750,19 @@ begin
   result := fBatch;
 end;
 
-procedure TSQLRestBatch.RawAdd(const SentData: RawUTF8);
+function TSQLRestBatch.RawAdd(const SentData: RawUTF8): integer;
 begin // '{"Table":[...,"POST",{object},...]}'
   if (fBatch=nil) or (fTable=nil) then
     raise EORMException.CreateUTF8('%.RawAdd %',[self,SentData]);
   fBatch.AddShort('"POST",');
   fBatch.AddString(SentData);
   fBatch.Add(',');
+  result := fBatchCount;
   inc(fBatchCount);
   inc(fAddCount);
 end;
 
-procedure TSQLRestBatch.RawUpdate(const SentData: RawUTF8; ID: TID);
+function  TSQLRestBatch.RawUpdate(const SentData: RawUTF8; ID: TID): integer;
 var sentID: TID;
 begin // '{"Table":[...,"PUT",{object},...]}'
   if (fBatch=nil) or (fTable=nil) then
@@ -33330,6 +33774,7 @@ begin // '{"Table":[...,"PUT",{object},...]}'
   fBatch.Add(',');
   fBatch.AddStringCopy(SentData,2,maxInt shr 2);
   fBatch.Add(',');
+  result := fBatchCount;
   inc(fBatchCount);
   inc(fUpdateCount);
 end;
@@ -33403,6 +33848,14 @@ begin
     SetLength(Values,ValuesCount+256+ValuesCount shr 3);
   Values[ValuesCount] := Value;
   inc(ValuesCount);
+end;
+
+procedure AddID(var Values: TIDDynArray; Value: TID);
+var n: integer;
+begin
+  n := length(Values);
+  SetLength(Values,n+1);
+  Values[n] := Value;
 end;
 
 function TSQLRestBatch.Delete(Table: TSQLRecordClass;
@@ -33569,10 +34022,9 @@ destructor TSQLRest.Destroy;
 var cmd: TSQLRestServerURIContextCommand;
     i: integer;
 begin
-  {$ifndef FPC} // serialization during destruction seems unsafe under FPC
-  InternalLog('%.Destroy -> %',[ClassType,self],sllInfo);
-  {$endif}
-  AsynchBatchStop;
+  InternalLog('%.Destroy',[ClassType],sllInfo); // don't include self (->GPF)
+  AsynchBatchStop(nil);
+  FreeAndNil(fBackgroundTimer);
   FreeAndNil(fServices);
   FreeAndNil(fCache);
   if (fModel<>nil) and (fModel.fRestOwner=self) then
@@ -33739,10 +34191,8 @@ end;
 
 function TSQLRest.EnsureBackgroundTimerExists: TSQLRestBackgroundTimer;
 begin
-  if fBackgroundTimer=nil then begin
+  if fBackgroundTimer=nil then
     fBackgroundTimer := TSQLRestBackgroundTimer.Create(self);
-    PrivateGarbageCollector.Add(fBackgroundTimer);
-  end;
   result := fBackgroundTimer;
 end;
 
@@ -33777,11 +34227,11 @@ begin
       Table,SendSeconds,PendingRowThreshold,AutomaticTransactionPerRow,Options);
 end;
 
-function TSQLRest.AsynchBatchStop: boolean;
+function TSQLRest.AsynchBatchStop(Table: TSQLRecordClass): boolean;
 begin
   if (self=nil) or (fBackgroundTimer=nil) or (fBackgroundTimer.fBackgroundBatch=nil) then
     result := false else
-    result := fBackgroundTimer.AsynchBatchStop;
+    result := fBackgroundTimer.AsynchBatchStop(Table);
 end;
 
 function TSQLRest.AsynchBatchAdd(Value: TSQLRecord; SendData,ForceID: boolean;
@@ -33793,13 +34243,25 @@ begin
       Value,SendData,ForceID,CustomFields,DoNotAutoComputeFields);
 end;
 
+function TSQLRest.AsynchBatchRawAdd(Table: TSQLRecordClass; const SentData: RawUTF8): integer;
+begin
+  if (self=nil) or (fBackgroundTimer=nil) or (fBackgroundTimer.fBackgroundBatch=nil) then
+    result := -1 else
+    result := fBackgroundTimer.AsynchBatchRawAdd(Table,SentData);
+end;
+
+procedure TSQLRest.AsynchBatchRawAppend(Table: TSQLRecordClass; SentData: TTextWriter);
+begin
+  if (self<>nil) and (fBackgroundTimer<>nil) and (fBackgroundTimer.fBackgroundBatch<>nil) then
+    fBackgroundTimer.AsynchBatchRawAppend(Table,SentData);
+end;
+
 function TSQLRest.AsynchBatchUpdate(Value: TSQLRecord;
   const CustomFields: TSQLFieldBits; DoNotAutoComputeFields: boolean): integer;
 begin
   if (self=nil) or (fBackgroundTimer=nil) or (fBackgroundTimer.fBackgroundBatch=nil) then
     result := -1 else
-    result := fBackgroundTimer.AsynchBatchUpdate(
-      Value,CustomFields,DoNotAutoComputeFields);
+    result := fBackgroundTimer.AsynchBatchUpdate(Value,CustomFields,DoNotAutoComputeFields);
 end;
 
 function TSQLRest.AsynchBatchDelete(Table: TSQLRecordClass; ID: TID): integer;
@@ -33810,22 +34272,32 @@ begin
 end;
 
 procedure TSQLRest.AsynchRedirect(const aGUID: TGUID;
-  const aDestinationInterface: IInvokable; out aCallbackInterface);
+  const aDestinationInterface: IInvokable; out aCallbackInterface;
+  const aOnResult: TOnAsynchRedirectResult);
 begin
   if self<>nil then
     EnsureBackgroundTimerExists.AsynchRedirect(
-      aGUID,aDestinationInterface,aCallbackInterface);
+      aGUID,aDestinationInterface,aCallbackInterface,aOnResult);
 end;
 
 procedure TSQLRest.AsynchRedirect(const aGUID: TGUID;
-  const aDestinationInstance: TInterfacedObject; out aCallbackInterface);
+  const aDestinationInstance: TInterfacedObject; out aCallbackInterface;
+  const aOnResult: TOnAsynchRedirectResult);
 begin
   if self<>nil then
     EnsureBackgroundTimerExists.AsynchRedirect(
-      aGUID,aDestinationInstance,aCallbackInterface);
+      aGUID,aDestinationInstance,aCallbackInterface,aOnResult);
 end;
 
-function TSQLRest.SystemUseTrack(periodSec: integer=10): TSystemUse;
+procedure TSQLRest.AsynchInterning(Interning: TRawUTF8Interning;
+  InterningMaxRefCount, PeriodMinutes: integer);
+begin
+  if self<>nil then
+    EnsureBackgroundTimerExists.AsynchInterning(
+      Interning,InterningMaxRefCount,PeriodMinutes);
+end;
+
+function TSQLRest.SystemUseTrack(periodSec: integer): TSystemUse;
 begin
   result := nil;
   if self=nil then
@@ -33897,6 +34369,15 @@ begin
   if MultiFieldValue(Table,[FieldName],Res,WhereClause) then
     result := Res[0] else
     result := '';
+end;
+
+function TSQLRest.OneFieldValueInt64(Table: TSQLRecordClass; const FieldName,
+  WhereClause: RawUTF8; Default: Int64): Int64;
+var Res: array[0..0] of RawUTF8;
+begin
+  if not MultiFieldValue(Table,[FieldName],Res,WhereClause) or
+     not ToInt64(Res[0],result) then
+    result := Default;
 end;
 
 function TSQLRest.OneFieldValue(Table: TSQLRecordClass; const FieldName: RawUTF8;
@@ -34512,9 +34993,9 @@ begin
 end;
 
 function TSQLRest.BatchSend(Batch: TSQLRestBatch): integer;
-var Res: TIDDynArray;
+var DummyRes: TIDDynArray;
 begin
-  result := BatchSend(Batch,Res);
+  result := BatchSend(Batch,DummyRes);
 end;
 
 function TSQLRest.RecordCanBeUpdated(Table: TSQLRecordClass; ID: TID;
@@ -34718,8 +35199,10 @@ begin
   if Model.TableProps[TableIndex].Kind in INSERT_WITH_ID then
     ForceID := true;
   if (Model.fIDGenerator<>nil) and (Model.fIDGenerator[TableIndex]<>nil) then begin
-    Value.fID := Model.fIDGenerator[TableIndex].ComputeNew;
-    ForceID := true;
+    if (Value.fID=0) or not ForceID then begin
+      Value.fID := Model.fIDGenerator[TableIndex].ComputeNew;
+      ForceID := true;
+    end;
   end else
     if Value.fID=0 then
       ForceID := false;
@@ -34748,14 +35231,14 @@ begin
   if SendData then
     GetJSONValuesForAdd(TableIndex,Value,ForceID,DoNotAutoComputeFields,false,CustomFields,json) else
     json := '';
-  // on success, returns the new ROWID value; on error, returns 0
+  // on success, returns the new RowID value; on error, returns 0
   fAcquireExecution[execORMWrite].fSafe.Lock;
   try // may be within a batch in another thread
     result := EngineAdd(TableIndex,json); // will call static if necessary
   finally
     fAcquireExecution[execORMWrite].fSafe.Unlock;
   end;
-  // on success, Value.ID is updated with the new ROWID
+  // on success, Value.ID is updated with the new RowID
   Value.fID := result;
   if SendData and (result<>0) then
     fCache.Notify(PSQLRecordClass(Value)^,result,json,soInsert);
@@ -34813,14 +35296,14 @@ begin
   end;
   TableIndex := Model.GetTableIndexExisting(PSQLRecordClass(Value)^);
   GetJSONValuesForAdd(TableIndex,Value,ForceID,DoNotAutoComputeFields,true,nil,json);
-  // on success, returns the new ROWID value; on error, returns 0
+  // on success, returns the new RowID value; on error, returns 0
   fAcquireExecution[execORMWrite].fSafe.Lock;
   try // may be within a batch in another thread
     result := EngineAdd(TableIndex,json); // will call static if necessary
   finally
     fAcquireExecution[execORMWrite].fSafe.Unlock;
   end;
-  // on success, Value.ID is updated with the new ROWID
+  // on success, Value.ID is updated with the new RowID
   Value.fID := result;
   // here fCache.Notify is not called, since the JSONValues is verbose
 end;
@@ -35064,9 +35547,10 @@ begin
     result := nil;
 end;
 
-function TSQLRest.ExecuteJson(const Tables: array of TSQLRecordClass; const SQL: RawUTF8): RawJSON;
+function TSQLRest.ExecuteJson(const Tables: array of TSQLRecordClass;
+  const SQL: RawUTF8; ForceAJAX: Boolean; ReturnedRowCount: PPtrInt): RawJSON;
 begin
-  result := EngineList(SQL,false);
+  result := EngineList(SQL,ForceAjax,ReturnedRowCount);
 end;
 
 function TSQLRest.Execute(const aSQL: RawUTF8): boolean;
@@ -35129,8 +35613,8 @@ begin
     with Table.RecordProps do begin // request all Values[] IDs at once
       aMainField := MainField[false];
       if aMainField>=0 then
-        OneFieldValues(Table,'RowID',Fields.List[aMainField].Name+' in ('+
-          RawUTF8ArrayToQuotedCSV(Values)+')',TInt64DynArray(IDs));
+        OneFieldValues(Table,'RowID',
+          SelectInClause(Fields.List[aMainField].Name,Values),TInt64DynArray(IDs));
     end;
   result := IDs<>nil;
 end;
@@ -35392,7 +35876,7 @@ begin
   result := false;
   Mutex.Lock;
   try
-    i := Value.Find(aID); // fast binary search by first ID field
+    i := Value.Find(aID); // fast O(log(n)) binary search by first ID field
     if i>=0 then
       with Values[i] do
       if TimeStamp512<>0 then // 0 when there is no JSON value cached
@@ -35756,10 +36240,12 @@ destructor TSQLRestThread.Destroy;
 begin
   inherited Destroy;
   if fOwnRest and (fRest<>nil) then begin
+    {$ifdef WITHLOG}
     if GetCurrentThreadId=ThreadID then begin
       fRest.fLogFamily := nil; // no log after fRest.EndCurrentThread(self)
       fRest.fLogClass := nil;
     end;
+    {$endif}
     FreeAndNil(fRest);
   end;
   fSafe.Done;
@@ -36136,7 +36622,7 @@ var url,root,interfmethod,interf,id,method,frames: RawUTF8;
 begin
   Ctxt.OutStatus := HTTP_BADREQUEST;
   url := Ctxt.Url;
-  if url='' then
+  if (url='') or (isDestroying in fInternalState) then
     exit;
   if url[1]='/' then
     system.delete(url,1,1);
@@ -36493,6 +36979,7 @@ end;
 constructor TSQLRestClientURI.Create(aModel: TSQLModel);
 begin
   inherited Create(aModel);
+  fMaximumAuthentificationRetry := 1;
   fSessionID := CONST_AUTHENTICATION_NOT_USED;
   fFakeCallbacks := TSQLRestClientCallbacks.Create(self);
   {$ifdef USELOCKERDEBUG}
@@ -36507,7 +36994,7 @@ var t,i: integer;
     aID: TID;
     Table: TSQLRecordClass;
 begin
-  include(fInternalOpen,ioNoOpen);
+  include(fInternalState,isDestroying);
   {$ifdef MSWINDOWS}
   fServiceNotificationMethodViaMessages.Wnd := 0; // disable notification
   {$endif}
@@ -36516,7 +37003,7 @@ begin
     SetLogClass(nil);
   {$endif}
   fBatchCurrent.Free;
-  fFakeCallbacks.Free;
+  FreeAndNil(fFakeCallbacks);
   try
     // unlock all still locked records by this client
     if Model<>nil then
@@ -36702,15 +37189,15 @@ begin
   if Call=nil then
     exit;
   InternalURI(Call^);
-  if OnIdleBackgroundThreadActive and not(ioNoOpen in fInternalOpen) then
-    if (Call^.OutStatus=HTTP_NOTIMPLEMENTED) and (ioOpened in fInternalOpen) then begin
+  if OnIdleBackgroundThreadActive and not(isDestroying in fInternalState) then
+    if (Call^.OutStatus=HTTP_NOTIMPLEMENTED) and (isOpened in fInternalState) then begin
       // InternalCheckOpen failed -> force recreate connection
       InternalClose;
-      Exclude(fInternalOpen,ioOpened);
+      Exclude(fInternalState,isOpened);
       if OnIdleBackgroundThreadActive then
         InternalURI(Call^); // try request again
     end else
-      Include(fInternalOpen,ioOpened);
+      Include(fInternalState,isOpened);
 end;
 
 function TSQLRestClientURI.GetOnIdleBackgroundThreadActive: boolean;
@@ -36741,57 +37228,38 @@ end;
 
 function TSQLRestClientURI.URI(const url, method: RawUTF8;
   Resp, Head, SendData: PRawUTF8): Int64Rec;
-var Retry: integer;
+var retry: Integer;
     aUserName, aPassword: string;
     StatusMsg: RawUTF8;
     Call: TSQLRestURIParams;
-    aRetryOnceOnTimeout, aPasswordHashed: boolean;
-label DoRetry;
-begin
-  if self=nil then begin
-    Int64(result) := HTTP_UNAVAILABLE;
-    SetLastException(nil,HTTP_UNAVAILABLE);
-    exit;
-  end;
-  aRetryOnceOnTimeout := RetryOnceOnTimeout;
-  fLastErrorMessage := '';
-  fLastErrorException := nil;
-  if fServerTimeStampOffset=0 then
-    if not ServerTimeStampSynchronize then begin
-      Int64(result) := HTTP_UNAVAILABLE;
-      exit; // if /TimeStamp is not available, server is down!
-    end;
-  Call.Init;
-  if (Head<>nil) and (Head^<>'') then
-    Call.InHead := Head^;
-  if fSessionHttpHeader<>'' then
-    Call.InHead := Trim(Call.InHead+#13#10+fSessionHttpHeader);
-  for Retry := -1 to MaximumAuthentificationRetry do
-  try
-DoRetry:
+    aPasswordHashed: Boolean;
+
+  procedure CallInternalURI;
+  begin
     Call.Url := url;
     if fSessionAuthentication<>nil then
-      fSessionAuthentication.ClientSessionSign(self,Call);
+      fSessionAuthentication.ClientSessionSign(Self,Call);
     Call.Method := method;
     if SendData<>nil then
       Call.InBody := SendData^;
-{$ifndef LVCL}
+    {$ifndef LVCL}
     if Assigned(fOnIdle) then begin
       if fBackgroundThread=nil then
         fBackgroundThread := TSynBackgroundThreadEvent.Create(OnBackgroundProcess,
-          OnIdle,FormatUTF8('% "%" background',[self,Model.Root]));
+          OnIdle,FormatUTF8('% "%" background',[Self,Model.Root]));
       if not fBackgroundThread.RunAndWait(@Call) then
         Call.OutStatus := HTTP_UNAVAILABLE;
     end else
-{$endif} begin
+    {$endif} 
+    begin
       InternalURI(Call);
-      if not(ioNoOpen in fInternalOpen) then
-        if (Call.OutStatus=HTTP_NOTIMPLEMENTED) and (ioOpened in fInternalOpen) then begin
+      if not(isDestroying in fInternalState) then
+        if (Call.OutStatus=HTTP_NOTIMPLEMENTED) and (isOpened in fInternalState) then begin
           InternalClose;     // force recreate connection
-          Exclude(fInternalOpen,ioOpened);
+          Exclude(fInternalState,isOpened);
           InternalURI(Call); // try request again
         end else
-          Include(fInternalOpen,ioOpened);
+          Include(fInternalState,isOpened);
     end;
     result.Lo := Call.OutStatus;
     result.Hi := Call.OutInternalState;
@@ -36800,11 +37268,50 @@ DoRetry:
     if Resp<>nil then
       Resp^ := Call.OutBody;
     fLastErrorCode := Call.OutStatus;
-    if (Call.OutStatus=HTTP_TIMEOUT) and aRetryOnceOnTimeout then begin
-      aRetryOnceOnTimeout := false;
-      InternalLog('% % returned "408 Request Timeout" -> RETRY',[method,url],sllError);
-      goto DoRetry;
+  end;
+
+begin
+  if Self=nil then begin
+    Int64(result) := HTTP_UNAVAILABLE;
+    SetLastException(nil,HTTP_UNAVAILABLE);
+    exit;
+  end;
+  fLastErrorMessage := '';
+  fLastErrorException := nil;
+  if fServerTimeStampOffset=0 then begin
+    if not ServerTimeStampSynchronize then begin
+      Int64(result) := HTTP_UNAVAILABLE;
+      exit; // if TimeStamp is not available,server is down!
     end;
+  end;
+  Call.Init;
+  if (Head<>nil) and (Head^<>'') then
+    Call.InHead := Head^;
+  if fSessionHttpHeader<>'' then
+    Call.InHead := Trim(Call.InHead + #13#10 + fSessionHttpHeader);
+  try
+    CallInternalURI;
+    if (Call.OutStatus=HTTP_TIMEOUT) and RetryOnceOnTimeout then begin
+      InternalLog('% % returned "408 Request Timeout" -> RETRY',[method,url],sllError);
+      CallInternalURI;
+    end else
+    if (Call.OutStatus=HTTP_FORBIDDEN) and (MaximumAuthentificationRetry>0) and
+       Assigned(OnAuthentificationFailed) and not(isInAuth in fInternalState) then
+      try
+        Include(fInternalState,isInAuth);
+        retry := 1;
+        while retry<=MaximumAuthentificationRetry do begin
+          // "403 Forbidden" in case of authentication failure -> try relog
+          if OnAuthentificationFailed(retry,aUserName,aPassword,aPasswordHashed) and
+             SetUser(StringToUTF8(aUserName),StringToUTF8(aPassword),aPasswordHashed) then begin
+            CallInternalURI;
+            break;
+          end;
+          Inc(retry);
+        end;
+      finally
+        Exclude(fInternalState,isInAuth);
+      end;
     if not StatusCodeIsSuccess(Call.OutStatus) then begin
       StatusCodeToErrorMsg(Call.OutStatus,StatusMsg);
       if Call.OutBody='' then
@@ -36813,14 +37320,8 @@ DoRetry:
       InternalLog('% % returned % (%) with message  %',
         [method,url,Call.OutStatus,StatusMsg,fLastErrorMessage],sllError);
       if Assigned(fOnFailed) then
-        fOnFailed(self,nil,@Call);
+        fOnFailed(Self,nil,@Call);
     end;
-    if (Call.OutStatus<>HTTP_FORBIDDEN) or not Assigned(OnAuthentificationFailed) then
-      break;
-    // "403 Forbidden" in case of authentication failure -> try relog
-    if not OnAuthentificationFailed(Retry+2,aUserName,aPassword,aPasswordHashed) or
-       not SetUser(StringToUTF8(aUserName),StringToUTF8(aPassword),aPasswordHashed) then
-      break;
   except
     on E: Exception do begin
       Int64(result) := HTTP_NOTIMPLEMENTED; // 501
@@ -36930,6 +37431,13 @@ function TSQLRestClientURI.ServiceDefineClientDriven(const aInterface: TGUID;
 begin
   result := ServiceRegisterClientDriven(
     TInterfaceFactory.GUID2TypeInfo(aInterface),Obj,aContractExpected);
+end;
+
+function TSQLRestClientURI.ServiceDefineSharedAPI(const aInterface: TGUID): TServiceFactoryClient;
+begin
+  result := ServiceDefine(aInterface,sicShared,SERVICE_CONTRACT_NONE_EXPECTED);
+  result.ParamsAsJSONObject := true; // no contract -> explicit parameters
+  result.ResultAsJSONObjectWithoutResult := true;
 end;
 
 procedure TSQLRestClientURI.ServicePublishOwnInterfaces(OwnServer: TSQLRestServer);
@@ -39658,9 +40166,9 @@ begin
   max := 0;
   repeat
     if n>=max then begin
-      if n>=96 then // avoid DOS - see MAX_METHOD_ARGS for TInterfacedObjectFake
+      if n>=256 then // avoid DOS - see MAX_METHOD_ARGS for TInterfacedObjectFake
         raise EParsingException.CreateUTF8(
-          'Security Policy: Accept up to 48 parameters for %.FillInput',[self]);
+          'Security Policy: Accept up to 128 parameters for %.FillInput',[self]);
       inc(max,16);
       SetLength(fInput,max);
     end;
@@ -39958,6 +40466,8 @@ begin
   if self=nil then
     exit;
   aOutSetCookie := Trim(aOutSetCookie);
+  if not IsValidUTF8WithoutControlChars(aOutSetCookie) then
+    raise EBusinessLayerException.CreateUTF8('Unsafe %.SetOutSetCookie',[self]);
   if PosEx('=',aOutSetCookie)<2 then
     raise EBusinessLayerException.CreateUTF8(
       '"name=value" expected for %.SetOutSetCookie("%")',[self,aOutSetCookie]);
@@ -40619,6 +41129,9 @@ begin
       if rsoCookieIncludeRootPath in fOptions then
         Call.OutHead := Call.OutHead+'; Path=/'; // case-sensitive Path=/ModelRoot
     end;
+    if not (rsoHttpHeaderCheckDisable in Options) and
+       IsInvalidHttpHeader(pointer(Call.OutHead), length(Call.OutHead)) then
+      Ctxt.Error('Unsafe HTTP header rejected', HTTP_SERVERERROR);
   finally
     QueryPerformanceCounter(timeEnd);
     Ctxt.MicroSecondsElapsed := fStats.FromExternalQueryPerformanceCounters(timeEnd-timeStart);
@@ -40642,10 +41155,10 @@ begin
     if fStatUsage<>nil then
       fStatUsage.Modified(fStats,[]);
     if Assigned(OnAfterURI) then
-    try
-      OnAfterURI(Ctxt);
-    except
-    end;
+      try
+        OnAfterURI(Ctxt);
+      except
+      end;
     Ctxt.Free;
   end;
   if safeid<>0 then
@@ -40690,12 +41203,14 @@ begin // called by root/TimeStamp/info REST method
     cpu := TSystemUse.Current(false).HistoryText(0,15,@mem);
     FormatUTF8('% / %',[m.PhysicalMemoryFree.Text,m.PhysicalMemoryTotal.Text],free);
     info.AddNameValuesToObject(['nowutc',now.Text(true,' ') , 'timestamp',now.Value,
-      'exe',ExeVersion.ProgramName, 'version',ExeVersion.Version.Detailed,
+      'exe',ExeVersion.ProgramName, 'version',ExeVersion.Version.DetailedOrVoid,
       'started',Stats.StartDate, 'clients',Stats.ClientsCurrent,
       'methods',Stats.ServiceMethod, 'interfaces',Stats.ServiceInterface,
       'total',Stats.TaskCount, 'time',Stats.TotalTime.Text, 'host',ExeVersion.Host,
       'cpu',cpu, 'mem',mem, 'memused',KB(m.AllocatedUsed.Bytes), 'memfree',free,
       'exception',GetLastExceptions(10)]);
+    if assigned(OnInternalInfo) then
+      OnInternalInfo(self,info);
   finally
     m.Free;
   end;
@@ -40939,7 +41454,8 @@ begin
 {$else}
 var info: TDocVariantData;
 begin
-  if IdemPropNameU(Ctxt.URIBlobFieldName,'info') then begin
+  if IdemPropNameU(Ctxt.URIBlobFieldName,'info') and
+     not (rsoTimeStampInfoURIDisable in fOptions) then begin
     info.InitFast;
     InternalInfo(info);
     Ctxt.Returns(info.ToJSON('','',jsonHumanReadable));
@@ -43743,7 +44259,7 @@ begin
   Ints.Add(pointer(aIndex));
 end;
 
-procedure TSQLRestStorageInMemory.DoNothingEvent(
+class procedure TSQLRestStorageInMemory.DoNothingEvent(
   aDest: pointer; aRec: TSQLRecord; aIndex: integer);
 begin
 end;
@@ -43854,7 +44370,7 @@ begin
     if FoundOffset<=0 then begin // omit first FoundOffset rows
       i64 := GetInt64(pointer(WhereValue),err);
       if (err=0) and (i64>0) then begin
-        ndx := IDToIndex(i64); // use fast binary search
+        ndx := IDToIndex(i64); // use fast O(log(n)) binary search
         if ndx>=0 then begin
           if Assigned(OnFind) then
             OnFind(Dest,TSQLRecord(fValue.List[ndx]),ndx);
@@ -44115,7 +44631,7 @@ begin
   with fValue do begin
     R := Count-1;
     if fIDSorted and (R>=8) then begin
-      // IDs are sorted -> use fast binary search algorithm
+      // IDs are sorted -> use fast O(log(n)) binary search algorithm
       L := 0;
       repeat
         result := (L + R) shr 1;
@@ -45002,7 +45518,7 @@ begin
   end;
 end;
 
-procedure TSQLRestStorageInMemory.DoCopyEvent(
+class procedure TSQLRestStorageInMemory.DoCopyEvent(
   aDest: pointer; aRec: TSQLRecord; aIndex: integer);
 begin
   if aDest<>nil then
@@ -45015,7 +45531,7 @@ begin
     result := nil;
 end;
 
-procedure TSQLRestStorageInMemory.DoInstanceEvent(aDest: pointer; aRec: TSQLRecord;
+class procedure TSQLRestStorageInMemory.DoInstanceEvent(aDest: pointer; aRec: TSQLRecord;
   aIndex: integer);
 begin
   if aDest<>nil then
@@ -45028,7 +45544,7 @@ begin
     result := nil;
 end;
 
-procedure TSQLRestStorageInMemory.DoIndexEvent(aDest: pointer; aRec: TSQLRecord;
+class procedure TSQLRestStorageInMemory.DoIndexEvent(aDest: pointer; aRec: TSQLRecord;
   aIndex: integer);
 begin
   if aDest<>nil then
@@ -45740,7 +46256,7 @@ function TSQLRestStorage.GetStoredClassName: RawUTF8;
 begin
   if self=nil then
     result := '' else
-    ShortStringToAnsi7String(PShortString(PPointer(PtrInt(fStoredClass)+vmtClassName)^)^,result);
+    ToText(fStoredClass,result);
 end;
 
 
@@ -45854,11 +46370,11 @@ begin
   if aStream=nil then
     exit;
   if fBinaryFile then begin
-      if ReadStringFromStream(aStream)=RawUTF8(ClassName)+'00' then
-      repeat
-        t := Model.GetTableIndex(ReadStringFromStream(aStream));
-      until (t<0) or
-        not TSQLRestStorageInMemory(fStaticData[t]).LoadFromBinary(aStream);
+    if ReadStringFromStream(aStream)=ToText(ClassType)+'00' then
+    repeat
+      t := Model.GetTableIndex(ReadStringFromStream(aStream));
+    until (t<0) or
+      not TSQLRestStorageInMemory(fStaticData[t]).LoadFromBinary(aStream);
   end else begin // [{"AuthUser":[{....},{...}]},{"AuthGroup":[{...},{...}]}]
     JSON := StreamToRawByteString(aStream); // assume UTF-8 content
     if JSON='' then
@@ -45919,7 +46435,7 @@ begin
   S := TFileStream.Create(FileName,fmCreate);
   try
     if fBinaryFile then begin
-      WriteStringToStream(S,RawUTF8(ClassName)+'00');
+      WriteStringToStream(S,ToText(ClassType)+'00');
       for t := 0 to fStaticDataCount-1 do
       with TSQLRestStorageInMemory(fStaticData[t]) do begin
         WriteStringToStream(S,fStoredClassRecordProps.SQLTableName);
@@ -46849,46 +47365,165 @@ begin
       _ObjAddProps([ContextName,FormatUTF8(ContextFormat,ContextArgs)],result);
 end;
 
-var
-  JSONCustomParsers: array of record
-    Kind: TClass;
+type
+  TJSONObject =
+    (oNone, oObject, oException, oSynException, oList, oObjectList,
+     {$ifndef LVCL}oCollection,{$endif}
+     oUtfs, oStrings, oSQLRecord, oSQLMany, oPersistent, oSynAutoCreateFields,
+     oSynPersistentWithPassword, oSynMonitor, oSQLTable,
+     oCustomReaderWriter, oCustomPropName);
+  TJSONCustomParser = record
     Reader: TJSONSerializerCustomReader;
     Writer: TJSONSerializerCustomWriter;
+    Props: PPropInfoDynArray;
+    Fields: PShortStringDynArray; // match Props[] order
+    Kind: TJSONObject;
   end;
+  TJSONCustomParsers = array of TJSONCustomParser;
+  PJSONCustomParser = ^TJSONCustomParser;
 
-type
-  TJSONCustomParserExpectedDirection = (cpRead, cpWrite);
-  TJSONCustomParserExpectedDirections = set of TJSONCustomParserExpectedDirection;
+var
+  JSONCustomParsers: TSynDictionary; // store TClass->TJSONCustomParser
 
-function JSONCustomParsersIndex(aClass: TClass;
-  aExpectedReadWriteTypes: TJSONCustomParserExpectedDirections): integer;
-  {$ifdef HASINLINE}inline;{$endif}
+function JSONObjectFromClass(aClassType: TClass; out aParser: PJSONCustomParser): TJSONObject;
+const
+  MAX = {$ifdef LVCL}15{$else}16{$endif};
+  TYP: array[0..MAX] of TClass = ( // all classes types gathered in CPU L1 cache
+    TObject,Exception,ESynException,TList,TObjectList,TPersistent,TSynAutoCreateFields,
+    TSynPersistentWithPassword,TSynPersistent,TInterfacedObjectWithCustomCreate,
+    TSynMonitor,TSQLRecordMany,TSQLRecord,TStrings,TRawUTF8List,TSQLTable
+    {$ifndef LVCL},TCollection{$endif});
+  OBJ: array[0..MAX] of TJSONObject = ( // oPersistent = has published properties
+    oObject,oException,oSynException,oList,oObjectList,oPersistent,oSynAutoCreateFields,
+    oSynPersistentWithPassword,oPersistent,oPersistent,
+    oSynMonitor,oSQLMany,oSQLRecord,oStrings,oUtfs,oSQLTable
+    {$ifndef LVCL},oCollection{$endif});
+var P: PJSONCustomParser;
+    added: boolean;
+    i: integer;
 begin
-  if JSONCustomParsers<>nil then
-    for result := 0 to length(JSONCustomParsers)-1 do
-      with JSONCustomParsers[result] do
-      if Kind=aClass then
-        if ((cpRead in aExpectedReadWriteTypes) and not Assigned(Reader)) or
-           ((cpWrite in aExpectedReadWriteTypes) and not Assigned(Writer)) then
-          break // any (un)serializer callbacks missing
-        else
-          exit; // found with appropriate (un)serializers callbacks
-  result := -1;
+  result := oNone;
+  if aClassType<>nil then begin
+    JSONCustomParsers.Safe.Lock;
+    try
+      aParser := JSONCustomParsers.FindValueOrAdd(aClassType,added);
+      if not added then begin
+        result := aParser^.Kind;
+        if result<>oNone then // fast retrieval from cache
+          exit; // =oNone if has been unsubscribed
+      end;
+      repeat // search from RTTI and parent custom registration
+        i := PtrUIntScanIndex(@TYP,MAX+1,PtrUInt(aClassType));
+        if i>=0 then begin
+          result := OBJ[i];
+          aParser^.Kind := result; // default serialization from RTTI
+          exit;
+        end;
+        {$ifdef FPC}
+        aClassType := aClassType.ClassParent;
+        {$else}
+        if PPointer(PtrInt(aClassType)+vmtParent)^<>nil then
+          aClassType := PPointer(PPointer(PtrInt(aClassType)+vmtParent)^)^ else
+          break;
+        {$endif}
+        P := JSONCustomParsers.FindValue(aClassType);
+        if (P<>nil) and (P^.Kind in [oCustomReaderWriter,oCustomPropName]) then begin
+          aParser^ := P^; // copy from parent
+          result := P^.Kind;
+          exit;
+        end;
+      until aClassType=nil; // should never happen, since TObject exists in TYP[]
+    finally
+      JSONCustomParsers.Safe.UnLock;
+    end;
+  end else
+    aParser := nil;
 end;
 
 class procedure TJSONSerializer.RegisterCustomSerializer(aClass: TClass;
   aReader: TJSONSerializerCustomReader; aWriter: TJSONSerializerCustomWriter);
+var added: boolean;
+    P: PJSONCustomParser;
+begin
+  JSONCustomParsers.Safe.Lock;
+  try
+    P := JSONCustomParsers.FindValueOrAdd(aClass,added);
+    P^.Writer := aWriter;
+    P^.Reader := aReader;
+    P^.Props := nil; // exclusive
+    P^.Fields := nil;
+    if Assigned(aWriter) or Assigned(aReader) then
+      P^.Kind := oCustomReaderWriter else
+      P^.Kind := oNone;
+  finally
+    JSONCustomParsers.Safe.UnLock;
+  end;
+end;
+
+function JSONCustomParsersFieldProp(ClassType: TClass; Parser: PJSONCustomParser;
+  PropName: PUTF8Char; PropNameLen: integer): PPropInfo;
 var i: integer;
 begin
-  i := JSONCustomParsersIndex(aClass,[]);
-  if i<0 then begin
-    i := length(JSONCustomParsers);
-    SetLength(JSONCustomParsers,i+1);
+  if Parser^.Props<>nil then begin // search from RegisterCustomSerializerFieldNames()
+    for i := 0 to length(Parser^.Fields)-1 do
+      if IdemPropNameU(Parser^.Fields[i]^,PropName,PropNameLen) then begin
+        result := Parser^.Props[i];
+        exit;
+      end;
+    result := nil;
+  end else // a previous RegisterCustomSerializerFieldNames() was unregistered
+    result := ClassFieldPropWithParentsFromUTF8(ClassType,PropName,PropNameLen);
+end;
+
+class procedure TJSONSerializer.RegisterCustomSerializerFieldNames(aClass: TClass;
+  const aClassFields, aJsonFields: array of ShortString);
+var prop: PPropInfoDynArray;
+    field: PShortStringDynArray;
+    n,p,f: integer;
+    found: boolean;
+    parser: PJSONCustomParser;
+begin
+  if high(aClassFields)<>high(aJsonFields) then
+    raise EParsingException.CreateUTF8('RegisterCustomSerializerFieldNames(%,%,%)'+
+      ' fields count mismatch', [aClass,high(aClassFields),high(aJsonFields)]);
+  if aClass.InheritsFrom(TSQLRecord) then
+    raise EParsingException.CreateUTF8('RegisterCustomSerializerFieldNames(%)'+
+      ' not allowed on ORM class', [aClass]);
+  prop := ClassFieldAllProps(aClass,[low(TTypeKind)..high(TTypeKind)]);
+  SetLength(field,length(prop));
+  n := 0;
+  for p := 0 to high(prop) do begin
+    found := false;
+    for f := 0 to high(aClassFields) do // check customized field name
+      if IdemPropName(prop[p].Name,aClassFields[f]) then begin
+        if aJsonFields[f]<>'' then begin // '' to ignore this property
+          field[n] := @aJsonFields[f];
+          prop[n] := prop[p];
+          inc(n);
+        end;
+        found := true;
+        break;
+      end;
+    if not found then begin // default serialization of published property
+      field[n] := @prop[p].Name;
+      prop[n] := prop[p];
+      inc(n);
+    end;
   end;
-  with JSONCustomParsers[i] do begin
-    Kind := aClass;
-    Writer := aWriter;
-    Reader := aReader;
+  SetLength(prop,n);
+  SetLength(field,n);
+  JSONCustomParsers.Safe.Lock;
+  try
+    parser := JSONCustomParsers.FindValueOrAdd(aClass,found);
+    @parser^.Writer := nil; // exclusive
+    @parser^.Reader := nil;
+    parser^.Props := prop;
+    parser^.Fields := field;
+    if Assigned(prop) then
+      parser^.Kind := oCustomPropName else
+      parser^.Kind := oNone;
+  finally
+    JSONCustomParsers.Safe.UnLock;
   end;
 end;
 
@@ -47134,53 +47769,6 @@ begin
     FreeAndNil(result); // avoid memory leak
 end;
 
-type
-  TJSONObject =
-    (oNone, oException, oSynException, oList, oObjectList,
-     {$ifndef LVCL}oCollection,{$endif}
-     oUtfs, oStrings, oSQLRecord, oSQLMany, oPersistent, oPersistentPassword,
-     oSynMonitor, oSQLTable, oCustom);
-
-function JSONObject(aClassType: TClass; out aCustomIndex: integer;
-  aExpectedReadWriteTypes: TJSONCustomParserExpectedDirections): TJSONObject;
-const
-  MAX = {$ifdef LVCL}14{$else}15{$endif};
-  TYP: array[0..MAX] of TClass = ( // all classes types gathered in CPU L1 cache
-    TObject,Exception,ESynException,TList,TObjectList,TPersistent,
-    TSynPersistentWithPassword,TSynPersistent,TInterfacedObjectWithCustomCreate,
-    TSynMonitor,TSQLRecordMany,TSQLRecord,TStrings,TRawUTF8List,TSQLTable
-    {$ifndef LVCL},TCollection{$endif});
-  OBJ: array[0..MAX] of TJSONObject = ( // oPersistent = has published properties
-    oNone,oException,oSynException,oList,oObjectList,oPersistent,
-    oPersistentPassword,oPersistent,oPersistent,
-    oSynMonitor,oSQLMany,oSQLRecord,oStrings,oUtfs,oSQLTable
-    {$ifndef LVCL},oCollection{$endif});
-var i: integer;
-begin
-  if aClassType<>nil then begin
-    repeat // guess class type (faster than multiple InheritsFrom calls)
-      aCustomIndex := JSONCustomParsersIndex(aClassType,aExpectedReadWriteTypes);
-      if aCustomIndex>=0 then begin
-        result := oCustom; // found custom type (may be as inherited)
-        exit;
-      end;
-      i := PtrUIntScanIndex(@TYP,MAX+1,PtrUInt(aClassType));
-      if i>=0 then begin
-        result := OBJ[i];
-        exit;
-      end;
-      {$ifdef FPC}
-      aClassType := aClassType.ClassParent;
-      {$else}
-      if PPointer(PtrInt(aClassType)+vmtParent)^<>nil then
-        aClassType := PPointer(PPointer(PtrInt(aClassType)+vmtParent)^)^ else
-        break;
-      {$endif}
-    until aClassType=nil;
-  end;
-  result := oNone;
-end;
-
 function PropIsIDTypeCastedField(Prop: PPropInfo; IsObj: TJSONObject;
   Value: TObject): boolean; // see [22ce911c715]
 begin
@@ -47197,237 +47785,392 @@ begin
     result := false; // assume true instance by default
 end;
 
+type
+  /// wrapper class to ease JSONToObject() maintainability
+  TJSONToObject = {$ifdef UNICODE}record{$else}object{$endif}
+  public
+    // input parameters
+    From: PUTF8Char;
+    Value: TObject;
+    Options: TJSONToObjectOptions;
+    TObjectListItemClass: TClass;
+    // output parameters
+    Dest: PUTF8Char;
+    Valid: boolean;
+    procedure Parse;
+  private
+    ValueClass: TClass;
+    IsObj: TJSONObject;
+    parser: PJSONCustomParser;
+    PropName, PropValue: PUTF8Char;
+    PropNameLen, PropValueLen: integer;
+    P: PPropInfo;
+    Kind: TTypeKind;
+    EndOfObject: AnsiChar;
+    NestedValid, wasString: boolean;
+    {$ifndef NOVARIANTS}
+    procedure HandleVariant;
+    {$endif}
+    procedure HandleObjectList(Lst: TObjectList);
+    {$ifndef LVCL}
+    procedure HandleCollection(Coll: TCollection);
+    {$endif}
+    procedure HandleStrings(Str: TStrings);
+    procedure HandleUtfs(utf: TRawUTF8List);
+    procedure HandleProperty(var tmp: RawUTF8);
+  end;
+
+function JSONToObject(var ObjectInstance; From: PUTF8Char; out Valid: boolean;
+  TObjectListItemClass: TClass; Options: TJSONToObjectOptions): PUTF8Char;
+var parser: TJSONToObject;
+begin
+  parser.From := From;
+  parser.Options := Options;
+  parser.TObjectListItemClass := TObjectListItemClass;
+  parser.Value := TObject(ObjectInstance);
+  parser.Parse;
+  Valid := parser.Valid;
+  result := parser.Dest;
+end;
+
 function ObjectLoadJSON(var ObjectInstance; const JSON: RawUTF8;
   TObjectListItemClass: TClass; Options: TJSONToObjectOptions): boolean;
 var tmp: TSynTempBuffer;
+    parser: TJSONToObject;
 begin
-  result := false;
   tmp.Init(JSON);
   if tmp.len<>0 then
     try
-      JSONToObject(ObjectInstance,tmp.buf,result,TObjectListItemClass,Options);
+      parser.From := tmp.buf;
+      parser.Options := Options;
+      parser.Value := TObject(ObjectInstance);
+      parser.Parse;
+      result := parser.Valid;
     finally
       tmp.Done;
-    end;
+    end else
+    result := false;
 end;
 
-function JSONToObject(var ObjectInstance; From: PUTF8Char; var Valid: boolean;
-  TObjectListItemClass: TClass; Options: TJSONToObjectOptions): PUTF8Char;
-var P: PPropInfo;
-    Value: TObject absolute ObjectInstance;
-    {$ifndef LVCL}
-    Coll: TCollection absolute ObjectInstance;
-    CollItem: TObject;
-    {$endif}
-    Str: TStrings absolute ObjectInstance;
-    Utf: TRawUTF8List absolute ObjectInstance;
-    Lst: TObjectList absolute ObjectInstance;
-    Item: TObject;
+procedure TJSONToObject.HandleObjectList(Lst: TObjectList);
+var Item: TObject;
+    ItemClass: TClass;
     ItemInstance: TClassInstance;
-    ValueClass, ItemClass: TClass;
-    V: PtrInt;
-    err: integer;
-    E: TSynExtended;
+begin
+  Lst.Clear;
+  ItemInstance.ItemClass := nil;
+  repeat
+    while From^ in [#1..' '] do inc(From);
+    case From^ of
+    #0: exit;
+    ']': begin
+      inc(From);
+      break;
+    end;
+    ',':
+      inc(From); // valid delimiter between objects
+    '{': begin
+      Dest := From;
+      if TObjectListItemClass=nil then begin // recognize "ClassName":...
+        ItemClass := JSONSerializerRegisteredClass.Find(From,true);
+        if ItemClass=nil then
+          exit; // unknown "ClassName":.. type
+      end else
+        ItemClass := TObjectListItemClass;
+      if ItemInstance.ItemClass<>ItemClass then
+        ItemInstance.Init(ItemClass);
+      Item := ItemInstance.CreateNew;
+      From := JSONToObject(Item,From,NestedValid,nil,Options);
+      if not NestedValid then begin
+        Dest := From;
+        exit;
+      end else
+      if From=nil then
+        exit;
+      Lst.Add(Item);
+    end;
+    else exit;
+    end;
+  until false;
+  // only way of being here is to have an ending ] at expected place
+  Valid := true;
+end;
+
+{$ifndef LVCL}
+procedure TJSONToObject.HandleCollection(Coll: TCollection);
+var CollItem: TObject;
+begin
+  Coll.BeginUpdate;
+  try
+    Coll.Clear;
+    repeat
+      while From^ in [#1..' '] do inc(From);
+      case From^ of
+      #0: exit;
+      ']': begin
+        inc(From);
+        break;
+      end;
+      ',':
+        inc(From); // valid delimiter between objects
+      '{': begin
+        Dest := From;
+        CollItem := Coll.Add;
+        From := JSONToObject(CollItem,From,NestedValid,nil,Options);
+        if not NestedValid then begin
+          Dest := From;
+          exit;
+        end else
+        if From=nil then
+          exit;
+      end;
+      else exit;
+      end;
+    until false;
+    // only way of being here is to have an ending ] at expected place
+    Valid := true;
+  finally
+    Coll.EndUpdate;
+  end;
+end;
+{$endif}
+
+procedure TJSONToObject.HandleStrings(Str: TStrings);
+var s: string;
+begin
+  {$ifndef LVCL}
+  Str.BeginUpdate; // Str: TStrings absolute Value
+  try
+  {$endif}
+    Str.Clear;
+    repeat
+      while From^ in [#1..' '] do inc(From);
+      case From^ of
+      #0: exit;
+      ']': begin
+        inc(From);
+        break;
+      end;
+      '"': begin
+        Dest := From;
+        PropValue := GetJSONField(From,From,@wasString,@EndOfObject,@PropValueLen);
+        if (PropValue=nil) or not wasString then
+          exit;
+        UTF8DecodeToString(PropValue,PropValueLen,s);
+        Str.Add(s);
+        case EndOfObject of
+          ']': break;
+          ',': continue;
+          else exit;
+        end;
+      end;
+      else exit;
+      end;
+    until false;
+    Valid := true;
+  {$ifndef LVCL}
+  finally
+    Str.EndUpdate;
+  end;
+  {$endif}
+end;
+
+procedure TJSONToObject.HandleUtfs(utf: TRawUTF8List);
+var U: RawUTF8;
+begin
+  utf.BeginUpdate;
+  try
+    utf.Clear;
+    repeat
+      while From^ in [#1..' '] do inc(From);
+      case From^ of
+      #0: exit;
+      ']': begin
+        inc(From);
+        break;
+      end;
+      '"': begin
+        Dest := From;
+        PropValue := GetJSONField(From,From,@wasString,@EndOfObject,@PropValueLen);
+        if (PropValue=nil) or not wasString then
+          exit;
+        SetString(U,PAnsiChar(PropValue),PropValueLen);
+        utf.Add(U);
+        case EndOfObject of
+          ']': break;
+          ',': if From=nil then exit else continue;
+          else exit;
+        end;
+      end;
+      else exit;
+      end;
+    until false;
+    Valid := true;
+  finally
+    utf.EndUpdate;
+  end;
+end;
+
+{$ifndef NOVARIANTS}
+procedure TJSONToObject.HandleVariant;
+var temp: variant;
+    opt: TDocVariantOptions;
+begin
+  if j2oHandleCustomVariants in Options then begin
+    if j2oHandleCustomVariantsWithinString in Options then
+      opt := [dvoValueCopiedByReference,dvoJSONObjectParseWithinString] else
+      opt := [dvoValueCopiedByReference];
+    GetVariantFromJSON(PropValue,wasString,temp,@opt,false);
+  end else
+    GetVariantFromJSON(PropValue,wasString,temp,nil,false);
+  P^.SetVariantProp(Value,temp);
+end;
+{$endif}
+
+procedure TJSONToObject.HandleProperty(var tmp: RawUTF8);
+var V: PtrInt;
     V64: Int64;
-    PropName, PropValue: PUTF8Char;
-    PropNameLen, PropValueLen: integer;
-    EndOfObject: AnsiChar;
-    Kind: TTypeKind;
-    wasString, NestedValid: boolean;
-    IsObj: TJSONObject;
-    IsObjCustomIndex: integer;
-    s: string;
-    WS: WideString;
+    E: TSynExtended;
+    err: integer;
+begin
+  PropValue := GetJSONFieldOrObjectOrArray(From,@wasString,@EndOfObject,
+    {$ifdef NOVARIANTS}false{$else}Kind=tkVariant{$endif},true,@PropValueLen);
+  if (PropValue=nil) or not (EndOfObject in ['}',',']) then
+    exit; // invalid JSON content (null has been handled above)
+  case Kind of
+  tkInt64{$ifdef FPC}, tkQWord{$endif}:
+    if wasString then
+      exit else begin
+      V64 := GetInt64(PropValue,err);
+      if err<>0 then
+        exit;
+      P^.SetInt64Prop(Value,V64);
+    end;
+  tkClass: begin
+    if wasString or (P^.PropType^.ClassSQLFieldType<>sftID) then
+      exit; // should have been handled above
+    V := GetInteger(PropValue,err);
+    if err<>0 then
+      exit; // invalid value
+    P^.SetOrdProp(Value,V);
+  end;
+  tkEnumeration: begin
+    if wasString then begin // in case enum stored as string
+      V := P^.PropType^.EnumBaseType^.GetEnumNameValue(PropValue,PropValueLen);
+      if V<0 then
+        if j2oIgnoreUnknownEnum in Options then
+          V := 0 else
+          exit;
+    end else begin
+      V := GetInteger(PropValue,err);
+      if err<>0 then
+        if j2oIgnoreUnknownEnum in Options then
+          V := 0 else
+          exit; // invalid value
+    end;
+    P^.SetOrdProp(Value,V);
+  end;
+  {$ifdef FPC} tkBool, {$endif}
+  tkInteger, tkSet:
+    if wasString then
+      exit else begin
+      // From='true' or From='false' were converted into '1 or '0'
+      V := GetInteger(PropValue,err);
+      if err<>0 then
+        exit; // invalid value
+      P^.SetOrdProp(Value,V);
+    end;
+  {$ifdef FPC}tkAString,{$endif}{$ifdef HASVARUSTRING}tkUString,{$endif}
+  tkLString,tkWString: // handle all string types from temporary RawUTF8
+    if wasString or (j2oIgnoreStringType in Options) then begin
+      SetString(tmp,PAnsiChar(PropValue),PropValueLen);
+      P^.SetLongStrValue(Value,tmp);
+    end else
+      exit;
+  {$ifdef PUBLISHRECORD}
+  tkRecord{$ifdef FPC},tkObject{$endif}:
+    RecordLoadJSON(P^.GetFieldAddr(Value)^,PropValue,P^.TypeInfo);
+  {$endif}
+  {$ifndef NOVARIANTS}
+  tkVariant:
+    HandleVariant;
+  {$endif}
+  tkFloat:
+    if P^.TypeInfo=TypeInfo(TDateTime) then
+      if wasString then begin
+        if PInteger(PropValue)^ and $ffffff=JSON_SQLDATE_MAGIC then
+          inc(PropValue,3); // ignore U+FFF1 pattern
+        P^.SetFloatProp(Value,Iso8601ToDateTimePUTF8Char(PropValue,PropValueLen));
+      end else
+        exit else
+    if wasString then
+      exit else
+    if (P^.TypeInfo=TypeInfo(Currency)) and P^.SetterIsField then
+      PInt64(P^.SetterAddr(Value))^ := StrToCurr64(PropValue) else begin
+      E := GetExtended(pointer(PropValue),err);
+      if err<>0 then
+        exit else // invalid JSON content
+        P^.SetFloatProp(Value,E);
+    end;
+    else
+      exit; // unhandled type
+  end;
+  Dest := nil; // if we reached here, no error occured with this property
+end;
+
+procedure TJSONToObject.Parse;
+var V: PtrInt;
+    DynArray: TDynArray;
     U: RawUTF8;
-    {$ifndef NOVARIANTS}
-    VVariant: variant;
-    DocVariantOptionsSet: TDocVariantOptions;
-label doProp;
-    {$endif}
 begin
   Valid := false;
-  result := From;
+  Dest := From;
   if Value=nil then
     exit;
-  ValueClass := Value.ClassType;
-  IsObj := JSONObject(ValueClass,IsObjCustomIndex,[cpRead]);
+  ValueClass := PClass(Value)^;
+  IsObj := JSONObjectFromClass(ValueClass,parser);
   if From=nil then begin
     case IsObj of // handle '' as Clear for arrays
-{$ifndef LVCL}
-    oCollection: Coll.Clear;
-{$endif}
-    oStrings:    Str.Clear;
-    oUtfs:       Utf.Clear;
-    oObjectList: Lst.Clear;
+    {$ifndef LVCL}
+    oCollection: TCollection(Value).Clear;
+    {$endif}
+    oStrings:    TStrings(Value).Clear;
+    oUtfs:       TRawUTF8List(Value).Clear;
+    oObjectList: TObjectList(Value).Clear;
     end;
     exit;
   end;
   if PInteger(From)^=NULL_LOW then begin
-    if (IsObj=oCustom) and Assigned(JSONCustomParsers[IsObjCustomIndex].Reader) then
+    if (IsObj=oCustomReaderWriter) and
+       Assigned(parser^.Reader) then
       // custom JSON reader expects to be executed even if value is null
-      result := JSONCustomParsers[IsObjCustomIndex].Reader(Value,From,Valid,Options) else begin
+      Dest := parser^.Reader(Value,From,Valid,Options) else begin
       FreeAndNil(Value);
-      result := From+4;
+      Dest := From+4;
       Valid := true; // null is a valid JSON object
     end;
     exit;
   end;
   while From^ in [#1..' '] do inc(From);
-  if IsObj=oCustom then
-  with JSONCustomParsers[IsObjCustomIndex] do begin
-    if Assigned(Reader) then // leave Valid=false if Reader=nil
-      result := Reader(Value,From,Valid,Options);
+  if IsObj=oCustomReaderWriter then begin // may be from [array] or {object}
+    if Assigned(parser^.Reader) then // leave Valid=false if Reader=nil
+      Dest := parser^.Reader(Value,From,Valid,Options);
     exit;
   end;
   if From^='[' then begin
     // nested array = TObjectList, TCollection, TRawUTF8List or TStrings
     inc(From);
     case IsObj of
-    oObjectList: begin // TList leaks memory, but TObjectList uses "ClassName":..
-      Lst.Clear;
-      ItemInstance.ItemClass := nil;
-      repeat
-        while From^ in [#1..' '] do inc(From);
-        case From^ of
-        #0: exit;
-        ']': begin
-          inc(From);
-          break;
-        end;
-        ',':
-          inc(From); // valid delimiter between objects
-        '{': begin
-          result := From;
-          if TObjectListItemClass=nil then begin // recognize "ClassName":...
-            ItemClass := JSONSerializerRegisteredClass.Find(From,true);
-            if ItemClass=nil then
-              exit; // unknown "ClassName":.. type
-          end else
-            ItemClass := TObjectListItemClass;
-          if ItemInstance.ItemClass<>ItemClass then
-            ItemInstance.Init(ItemClass);
-          Item := ItemInstance.CreateNew;
-          From := JSONToObject(Item,From,NestedValid,nil,Options);
-          if not NestedValid then begin
-            result := From;
-            exit;
-          end else
-          if From=nil then
-            exit;
-          Lst.Add(Item);
-        end;
-        else exit;
-        end;
-      until false;
-      // only way of being here is to have an ending ] at expected place
-      Valid := true;
-    end;
-{$ifndef LVCL}
-    oCollection: begin
-      Coll.BeginUpdate;  // Coll: TCollection absolute Value
-      try
-        Coll.Clear;
-        repeat
-          while From^ in [#1..' '] do inc(From);
-          case From^ of
-          #0: exit;
-          ']': begin
-            inc(From);
-            break;
-          end;
-          ',':
-            inc(From); // valid delimiter between objects
-          '{': begin
-            result := From;
-            CollItem := Coll.Add;
-            From := JSONToObject(CollItem,From,NestedValid,nil,Options);
-            if not NestedValid then begin
-              result := From;
-              exit;
-            end else
-            if From=nil then
-              exit;
-          end;
-          else exit;
-          end;
-        until false;
-        // only way of being here is to have an ending ] at expected place
-        Valid := true;
-      finally
-        Coll.EndUpdate;
-      end;
-    end;
-{$endif}
-    oStrings: begin
-{$ifndef LVCL}
-      Str.BeginUpdate; // Str: TStrings absolute Value
-      try
-{$endif}
-        Str.Clear;
-        repeat
-          while From^ in [#1..' '] do inc(From);
-          case From^ of
-          #0: exit;
-          ']': begin
-            inc(From);
-            break;
-          end;
-          '"': begin
-            result := From;
-            PropValue := GetJSONField(From,From,@wasString,@EndOfObject,@PropValueLen);
-            if (PropValue=nil) or not wasString then
-              exit;
-            UTF8DecodeToString(PropValue,PropValueLen,s);
-            Str.Add(s);
-            case EndOfObject of
-              ']': break;
-              ',': continue;
-              else exit;
-            end;
-          end;
-          else exit;
-          end;
-        until false;
-        Valid := true;
-{$ifndef LVCL}
-      finally
-        Str.EndUpdate;
-      end;
-{$endif}
-    end;
-    oUtfs: begin
-      utf.BeginUpdate; // utf: TRawUTF8List absolute Value
-      try
-        utf.Clear;
-        repeat
-          while From^ in [#1..' '] do inc(From);
-          case From^ of
-          #0: exit;
-          ']': begin
-            inc(From);
-            break;
-          end;
-          '"': begin
-            result := From;
-            PropValue := GetJSONField(From,From,@wasString,@EndOfObject,@PropValueLen);
-            if (PropValue=nil) or not wasString then
-              exit;
-            SetString(U,PAnsiChar(PropValue),PropValueLen);
-            utf.Add(U);
-            case EndOfObject of
-              ']': break;
-              ',': if From=nil then exit else continue;
-              else exit;
-            end;
-          end;
-          else exit;
-          end;
-        until false;
-        Valid := true;
-      finally
-        utf.EndUpdate;
-      end;
-    end;
+    oObjectList: // TList leaks memory, but TObjectList uses "ClassName":..
+      HandleObjectList(TObjectList(Value));
+    {$ifndef LVCL}
+    oCollection:
+      HandleCollection(TCollection(Value));
+    {$endif}
+    oStrings:
+      HandleStrings(TStrings(Value));
+    oUtfs:
+      HandleUtfs(TRawUTF8List(Value));
     end; // case IsObj of
     // Valid=false if not TCollection, TRawUTF8List nor TStrings
     if Valid and (From<>nil) then begin
@@ -47435,11 +48178,11 @@ begin
       if From^=#0 then
         From := nil;
     end;
-    result := From;
+    Dest := From;
     exit; // a JSON array begin with [
-  end else
+  end;
   if From^<>'{' then begin
-    result := From;
+    Dest := From;
     exit; // a JSON object MUST begin with {
   end;
   repeat inc(From) until (From^=#0) or (From^>' ');
@@ -47449,28 +48192,32 @@ begin
     EndOfObject := '}';
     Inc(From);
   end else
+  // for each fields
   repeat
     wasString := false;
-    result := From;
+    Dest := From;
     PropName := GetJSONPropName(From,@PropNameLen);  // get property name
-    if (From=nil) or (PropNameLen=0) then
+    if (From=nil) or (PropName=nil) then
       exit; // invalid JSON content
     if IdemPropName('ClassName',PropName,PropNameLen) then begin
       // WriteObject() was called with woStoreClassName option -> ignore it
       PropValue := GetJSONField(From,From,@wasString,@EndOfObject);
       if (PropValue=nil) or not wasString or not (EndOfObject in ['}',',']) then
         exit; // invalid JSON content
-      continue; 
-    end;
-    if (IsObj in [oSQLRecord,oSQLMany]) and IsRowID(PropName) then begin
-      // manual handling of TSQLRecord.ID property unserialization
-      PropValue := GetJSONField(From,From,@wasString,@EndOfObject);
-      if (PropValue=nil) or wasString or not (EndOfObject in ['}',',']) then
-        exit; // invalid JSON content
-      SetID(PropValue,TSQLRecord(Value).fID);
       continue;
     end;
-    P := ClassFieldPropWithParentsFromUTF8(ValueClass,PropName,PropNameLen);
+    if IsObj in [oSQLRecord,oSQLMany] then
+      if IsRowID(PropName) then begin
+        // manual handling of TSQLRecord.ID property unserialization
+        PropValue := GetJSONField(From,From,@wasString,@EndOfObject);
+        if (PropValue=nil) or wasString or not (EndOfObject in ['}',',']) then
+          exit; // invalid JSON content
+        SetID(PropValue,TSQLRecord(Value).fID);
+        continue;
+      end;
+    if IsObj=oCustomPropName then
+      P := JSONCustomParsersFieldProp(ValueClass,parser,PropName,PropNameLen) else
+      P := ClassFieldPropWithParentsFromUTF8(ValueClass,PropName,PropNameLen);
     if P=nil then // unknown property
       if j2oIgnoreUnknownProperty in Options then begin
         From := GotoNextJSONItem(From,1,@EndOfObject);
@@ -47479,11 +48226,11 @@ begin
         exit; // by default, abort
     Kind := P^.PropType^.Kind;
     while From^ in [#1..' '] do inc(From);
-    result := From;
+    Dest := From;
     if PInteger(From)^=NULL_LOW then begin
-      // null value should set the default value, or free nested object 
+      // null value should set the default value, or free nested object
       if (Kind=tkClass) and (IsObj in [oSQLRecord,oSQLMany]) then
-          exit; // null expects a plain TSynPersistent/TPersistent
+        exit; // null expects a plain TSynPersistent/TPersistent
       P^.SetDefaultValue(Value); // will set 0,'' or FreeAndNil(NestedObject)
       inc(From,4);
       while From^ in [#1..' '] do inc(From);
@@ -47491,17 +48238,13 @@ begin
       if From^ in EndOfJSONField then
         inc(From);
     end else
-    if From^ in ['[','{'] then begin
-      // nested array or object
+    if (From^ in ['[','{']) {$ifndef NOVARIANTS}and (Kind<>tkVariant){$endif} then begin
       if Kind=tkDynArray then begin
-        From := P^.GetDynArray(Value).LoadFromJSON(From);
+        P^.GetDynArray(Value,DynArray);
+        From := DynArray.LoadFromJSON(From);
         if From=nil then
           exit; // invalid '[dynamic array]' content
       end else
-      {$ifndef NOVARIANTS}
-      if Kind=tkVariant then
-        goto doProp else
-      {$endif}
       if (Kind=tkSet) and (From^='[') then begin // set as string array
         V := GetSetNameValue(P^.TypeInfo,From,EndOfObject);
         P^.SetOrdProp(Value,V);
@@ -47521,7 +48264,7 @@ begin
         // will handle '[TCollection...' '[TStrings...' '{TObject...'
         From := P^.ClassFromJSON(Value,From,NestedValid,Options);
         if not NestedValid then begin
-          result := From;
+          Dest := From;
           exit;
         end else
         if From=nil then
@@ -47532,118 +48275,20 @@ begin
       if From^ in EndOfJSONField then
         inc(From);
     end else begin
-doProp: // normal property value
-      PropValue := GetJSONFieldOrObjectOrArray(From,@wasString,@EndOfObject,
-        {$ifdef NOVARIANTS}false{$else}Kind=tkVariant{$endif},true,@PropValueLen);
-      if (PropValue=nil) or not (EndOfObject in ['}',',']) then
-        exit; // invalid JSON content (null has been handled above)
-      case Kind of
-      tkInt64{$ifdef FPC}, tkQWord{$endif}:
-        if wasString then
-          exit else begin
-          V64 := GetInt64(PropValue,err);
-          if err<>0 then
-            exit;
-          P^.SetInt64Prop(Value,V64);
-        end;
-      tkClass: begin
-        if wasString or (P^.PropType^.ClassSQLFieldType<>sftID) then
-          exit; // should have been handled above
-        V := GetInteger(PropValue,err);
-        if err<>0 then
-          exit; // invalid value
-        P^.SetOrdProp(Value,V);
-      end;
-      tkEnumeration: begin
-        if wasString then begin // in case enum stored as string
-          V := P^.PropType^.EnumBaseType^.GetEnumNameValue(PropValue,PropValueLen);
-          if V<0 then
-            if j2oIgnoreUnknownEnum in Options then
-              V := 0 else
-              exit;
-        end else begin
-          V := GetInteger(PropValue,err);
-          if err<>0 then
-            if j2oIgnoreUnknownEnum in Options then
-              V := 0 else
-              exit; // invalid value
-        end;
-        P^.SetOrdProp(Value,V);
-      end;
-      {$ifdef FPC} tkBool, {$endif}
-      tkInteger, tkSet:
-        if wasString then
-          exit else begin
-          // From='true' or From='false' were converted into '1 or '0'
-          V := GetInteger(PropValue,err);
-          if err<>0 then
-            exit; // invalid value
-          P^.SetOrdProp(Value,V);
-        end;
-      {$ifdef FPC}tkAString,{$endif} tkLString: 
-        if wasString or (j2oIgnoreStringType in Options) then begin
-          SetString(U,PAnsiChar(PropValue),PropValueLen);
-          P^.SetLongStrValue(Value,U);
-        end else
-          exit;
-      {$ifdef HASVARUSTRING}
-      tkUString:
-        if wasString or (j2oIgnoreStringType in Options) then
-          P^.SetUnicodeStrProp(Value,
-            UTF8DecodeToUnicodeString(PropValue,PropValueLen)) else
-          exit;
-      {$endif}
-      tkWString:
-        if wasString or (j2oIgnoreStringType in Options) then begin
-          UTF8ToWideString(PropValue,PropValueLen,WS);
-          P^.SetWideStrProp(Value,WS);
-        end else
-          exit;
-      {$ifdef PUBLISHRECORD}
-      tkRecord{$ifdef FPC},tkObject{$endif}:
-        if not wasString then
-          exit else
-          RecordLoadJSON(P^.GetFieldAddr(Value)^,PropValue,P^.TypeInfo);
-      {$endif}
-      {$ifndef NOVARIANTS}
-      tkVariant: begin
-        if j2oHandleCustomVariants in Options then begin
-          if j2oHandleCustomVariantsWithinString in Options then
-            DocVariantOptionsSet := [dvoValueCopiedByReference,dvoJSONObjectParseWithinString] else
-            DocVariantOptionsSet := [dvoValueCopiedByReference];
-          GetVariantFromJSON(PropValue,wasString,VVariant,@DocVariantOptionsSet);
-        end else
-          GetVariantFromJSON(PropValue,wasString,VVariant);
-        P^.SetVariantProp(Value,VVariant);
-      end;
-      {$endif}
-      tkFloat:
-        if P^.TypeInfo=TypeInfo(TDateTime) then
-          if wasString then begin
-            if PInteger(PropValue)^ and $ffffff=JSON_SQLDATE_MAGIC then
-              inc(PropValue,3); // ignore U+FFF1 pattern
-            P^.SetFloatProp(Value,Iso8601ToDateTimePUTF8Char(PropValue,PropValueLen));
-          end else
-            exit else
-        if wasString then
-          exit else
-        if (P^.TypeInfo=TypeInfo(Currency)) and P^.SetterIsField then
-          PInt64(P^.SetterAddr(Value))^ := StrToCurr64(PropValue) else begin
-          E := GetExtended(pointer(PropValue),err);
-          if err<>0 then
-            exit else // invalid JSON content
-            P^.SetFloatProp(Value,E);
-        end;
-      end;
+      HandleProperty(U);
+      if Dest<>nil then
+        exit; // an error occured
     end;
   until (From=nil) or (EndOfObject='}');
+  if IsObj=oSynAutoCreateFields then
+    TSynAutoCreateFields(Value).AfterLoad;
   if From<>nil then begin
     while From^ in [#1..' '] do inc(From);
     if From^=#0 then
       From := nil;
   end;
   Valid := (EndOfObject='}'); // mark parsing success
-  result := From;
+  Dest := From;
 end;
 
 function UrlDecodeObject(U: PUTF8Char; Upper: PAnsiChar; var ObjectInstance;
@@ -47757,8 +48402,7 @@ var source: PUTF8Char;
 begin
   if Value=nil then
     exit; // avoid GPF
-  PWord(UpperCopyShort(UpperSection,PShortString(PPointer(
-    PPtrInt(Value)^+vmtClassName)^)^))^ := ord(']');
+  PWord(UpperCopyShort(UpperSection,ClassNameShort(Value)^))^ := ord(']');
   source := pointer(FromContent);
   if FindSectionFirstLine(source,UpperSection) then
     ReadObject(Value,source,SubCompName);
@@ -47822,18 +48466,18 @@ begin
     if C<>TPersistentWithCustomCreate then
     if C<>TSynPersistent then
     if C<>TComponent then
-  {$ifndef LVCL}
+    {$ifndef LVCL}
     if C<>TInterfacedCollection then
     if C<>TCollection then
     if C<>TCollectionItem then
-  {$endif}
-  {$ifdef FPC}
+    {$endif}
+    {$ifdef FPC}
     if C.ClassParent<>nil then begin
       C := C.ClassParent;
-  {$else}
+    {$else}
     if PPointer(PtrInt(C)+vmtParent)^<>nil then begin
       C := PPointer(PPointer(PtrInt(C)+vmtParent)^)^;
-  {$endif}
+    {$endif}
       if C<>nil then
         continue else begin
         ItemCreate := cicTObject;
@@ -47843,7 +48487,8 @@ begin
       ItemCreate := cicTObject;
       exit;
     end else
-  {$ifndef LVCL} begin
+    {$ifndef LVCL}
+    begin
       ItemCreate := cicTCollectionItem;
       exit;
     end else begin // plain TCollection shall have been registered
@@ -47858,7 +48503,8 @@ begin
       ItemCreate := cicTInterfacedCollection;
       exit;
     end else
-  {$endif} begin
+    {$endif}
+    begin
       ItemCreate := cicTComponent;
       exit;
     end else begin
@@ -47941,6 +48587,11 @@ begin
   end;
 end;
 
+procedure TClassInstance.SetCustomComment(var CustomComment: RawUTF8);
+begin
+  FormatUTF8('array of {%}',[ClassFieldNamesAllPropsAsText(ItemClass,true)],
+    CustomComment)
+end;
 
 {$ifdef MSWINDOWS}
 
@@ -48107,33 +48758,38 @@ end;
 {$endif}
 
 
-
 { TSQLRecordSigned }
 
-function TSQLRecordSigned.CheckSignature(const Content: RawByteString): boolean;
-var tmp: RawUTF8;
-    i: integer;
-    SHA: TSHA256;
+function TSQLRecordSigned.ComputeSignature(const UserName,Content: RawByteString): RawUTF8;
+var SHA: TSHA256;
     Digest: TSHA256Digest;
 begin
+  SHA.Init;
+  SHA.Update(TTimeLogBits(fSignatureTime).Text(false));
+  SHA.Update(ToText(ClassType));
+  SHA.Update(UserName);
+  SHA.Update(Content);
+  SHA.Final(Digest);
+  result := SHA256DigestToString(Digest);
+end;
+
+function TSQLRecordSigned.CheckSignature(const Content: RawByteString): boolean;
+var i: integer;
+    sign: RawUTF8;
+begin
   result := false;
+  if self=nil then
+    exit;
   i := PosEx(RawUTF8('/'),fSignature,1);
   if i=0 then
     exit;
-  tmp := TTimeLogBits(fSignatureTime).Text(false)+RawUTF8(ClassName)+copy(fSignature,1,i-1);
-  SHA.Init;
-  SHA.Update(pointer(tmp),length(tmp));
-  SHA.Update(pointer(Content),length(Content)); // hash in place: no Content copy
-  SHA.Final(Digest);
-  if SHA256DigestToString(Digest)=copy(fSignature,i+1,sizeof(Digest)*2) then
+  sign := ComputeSignature(copy(fSignature,1,i-1),Content);
+  if IdemPropNameU(sign,copy(fSignature,i+1,sizeof(TSHA256Digest)*2)) then
     result := true;
 end;
 
 function TSQLRecordSigned.SetAndSignContent(const UserName: RawUTF8;
   const Content: RawByteString; ForcedSignatureTime: Int64): boolean;
-var tmp: RawUTF8;
-    SHA: TSHA256;
-    Digest: TSHA256Digest;
 begin
   result := (fSignature='') and (fSignatureTime=0);
   if not result then
@@ -48141,19 +48797,15 @@ begin
   if ForcedSignatureTime<>0 then
     fSignatureTime := ForcedSignatureTime else
     fSignatureTime := TimeLogNow;
-  { content is hashed with User Name value }
-  tmp := TTimeLogBits(fSignatureTime).Text(false)+RawUTF8(ClassName)+UserName;
-  SHA.Init;
-  SHA.Update(pointer(tmp),length(tmp));
-  SHA.Update(pointer(Content),length(Content)); // hash in place: no Content copy
-  SHA.Final(Digest);
-  fSignature := UserName+'/'+SHA256DigestToString(Digest);
+  fSignature := UserName+'/'+ComputeSignature(UserName,Content);
 end;
 
 function TSQLRecordSigned.SignedBy: RawUTF8;
 var i: integer;
 begin
-  i := PosEx(RawUTF8('/'),fSignature,1);
+  if self=nil then
+    i := 0 else
+    i := PosEx(RawUTF8('/'),fSignature,1);
   if i=0 then
     result := '' else
     result := copy(fSignature,1,i-1);
@@ -48243,7 +48895,7 @@ begin
     exit;
   main := Server.Model.Tables[Props.fFTSWithoutContentTableIndex].SQLTableName;
   if not Server.IsInternalSQLite3Table(Props.fFTSWithoutContentTableIndex) then begin
-    Server.InternalLog('% is an external content FTS4 table but source % is not '+
+    Server.InternalLog('% is an external content FTS4/5 table but source % is not '+
       'a local SQLite3 table: FTS search will be unavailable',[self,main],sllWarning);
     exit;
   end;
@@ -49047,7 +49699,8 @@ const
     ' INTEGER, ',                    // sftRecordVersion
     ' INTEGER, ',                    // sftSessionUserID
     ' TEXT COLLATE ISO8601, ',       // sftDateTimeMS
-    ' INTEGER, ');                   // sftUnixTime
+    ' INTEGER, ',                    // sftUnixTime
+    ' INTEGER, ');                   // sftUnixMSTime
 begin
   if (self=nil) or (cardinal(FieldIndex)>=cardinal(Fields.Count)) then
     result := '' else
@@ -49266,9 +49919,16 @@ begin
   L := length(PropName);
   if (L=0) or (self=nil) then
     result := false else
-    if (PropName[L]=')') and
-       (IdemPCharArray(pointer(PropName),['MAX(','MIN(','AVG(','SUM('])>=0) then
-      result := IsFieldName(copy(PropName,5,L-5)) else
+    if PropName[L]=')' then
+      case IdemPCharArray(pointer(PropName),['MAX(','MIN(','AVG(','SUM(',
+         'JSONGET(','JSONHAS(']) of
+      0..3:
+        result := IsFieldName(copy(PropName,5,L-5));
+      4..5:
+        result := IsFieldName(copy(PropName,9,PosEx(',',PropName)-9));
+      else
+        result := IsFieldName(PropName);
+      end else
       result := IsFieldName(PropName);
 end;
 
@@ -49615,6 +50275,16 @@ end;
 procedure TJSONSerializer.WriteObject(Value: TObject; Options: TTextWriterWriteObjectOptions);
 var Added: boolean;
     CustomComment: RawUTF8;
+    CustomPropName: PShortString;
+    IsObj: TJSONObject;
+    WS: WideString;
+    {$ifdef HASVARUSTRING}
+    US: UnicodeString;
+    {$endif}
+    tmp: RawByteString;
+    {$ifndef NOVARIANTS}
+    VVariant: variant;
+    {$endif}
 
   procedure HR(P: PPropInfo=nil);
   begin
@@ -49628,16 +50298,232 @@ var Added: boolean;
     end;
     if P=nil then
       exit;
-    AddPropName(P^.Name); // will handle twoForceJSONExtended in CustomOptions
+    if CustomPropName<>nil then
+      AddPropName(CustomPropName^) else
+      AddPropName(P^.Name); // handle twoForceJSONExtended in CustomOptions
     if woHumanReadable in Options then
       Add(' ');
     Added := true;
   end;
+  procedure WriteProp(P: PPropInfo);
+  var V64: Int64;
+      Obj: TObject;
+      V, c, codepage: integer;
+      Kind: TTypeKind;
+      PS: PShortString;
+      dyn: TDynArray;
+      dynObjArray: PClassInstance;
+  begin
+    if Assigned(OnWriteObject) and OnWriteObject(self,Value,P,Options) then
+      exit;
+    if IsObj in [oSQLRecord,oSQLMany] then begin // ignore "stored AS_UNIQUE"
+      if IsRowIDShort(P^.Name) then
+        exit; // should not happen
+    end else
+      if not (woStoreStoredFalse in Options) and
+         not P^.IsStored(Value) then
+        exit; // ignore regular "stored false" attribute
+    Added := false;  // HR(P) will write field name and set Added := true
+    Kind := P^.PropType^.Kind;
+    case Kind of
+      tkInt64{$ifdef FPC}, tkQWord{$endif}: begin
+        V64 := P^.GetInt64Prop(Value);
+        if not ((woDontStoreDefault in Options) and (V64=Int64(P^.Default))) then begin
+          HR(P);
+          if woTimeLogAsText in Options then
+            case P^.PropType^.GetSQLFieldType of
+            sftTimeLog,sftModTime,sftCreateTime: begin
+              Add('"');
+              AddTimeLog(@V64);
+              Add('"');
+            end;
+            sftUnixTime: begin
+              Add('"');
+              AddUnixTime(@V64);
+              Add('"');
+            end;
+            sftUnixMSTime: begin
+              Add('"');
+              AddUnixMSTime(@V64);
+              Add('"');
+            end;
+            else Add(V64);
+            end
+          else Add(V64);
+        end;
+      end;
+      {$ifdef FPC} tkBool, {$endif}
+      tkEnumeration, tkInteger, tkSet: begin
+        V := P^.GetOrdProp(Value);
+        if (V<>P^.Default) or not (woDontStoreDefault in Options) then begin
+          HR(P);
+          if {$ifdef FPC}(Kind=tkBool) or{$endif}
+             ((Kind=tkEnumeration) and (P^.TypeInfo=TypeInfo(boolean))) then
+            Add(boolean(V)) else
+            if (woFullExpand in Options) or (woHumanReadable in Options) or
+               (woEnumSetsAsText in Options) or
+               (twoEnumSetsAsTextInRecord in CustomOptions) then
+            case Kind of
+            tkEnumeration:
+            with P^.PropType^.EnumBaseType^ do begin
+              Add('"');
+              PS := GetEnumNameOrd(V);
+              if twoTrimLeftEnumSets in CustomOptions then
+                AddTrimLeftLowerCase(PS) else
+                AddShort(PS^);
+              Add('"');
+              if woHumanReadableEnumSetAsComment in Options then
+                GetEnumNameAll(CustomComment,'',true);
+            end;
+            tkSet:
+            with P^.PropType^.SetEnumType^ do begin
+              GetSetNameCSV(self,V,',',woHumanReadableFullSetsAsStar in Options);
+              if woHumanReadableEnumSetAsComment in Options then
+                GetEnumNameAll(CustomComment,'"*" or a set of ',true);
+            end;
+            else
+              Add(V);
+            end else
+              Add(V); // typecast enums and sets as plain integer by default
+        end;
+      end;
+      {$ifdef FPC}tkAString,{$endif} tkLString: begin
+        codepage := P^.PropType^.AnsiStringCodePage;
+        if (codepage=CP_SQLRAWBLOB) and not (woSQLRawBlobAsBase64 in Options) then begin
+          if not (woDontStoreEmptyString in Options) then begin
+            HR(P);
+            AddShort('""');
+          end;
+        end else begin
+          P^.GetLongStrProp(Value,tmp);
+          if (tmp<>'') or not (woDontStoreEmptyString in Options) then begin
+            HR(P);
+            Add('"');
+            if (IsObj=oSynPersistentWithPassword) and (codepage=CP_UTF8) and
+               ((woHideSynPersistentPassword in Options) or
+                (woFullExpand in Options)) and
+               P^.GetterIsField and (P^.GetterAddr(Value)=
+                 TSynPersistentWithPassword(Value).GetPasswordFieldAddress) then begin
+              if tmp<>'' then
+                AddShort('***');
+            end else
+              AddAnyAnsiString(tmp,twJSONEscape,codepage);
+            Add('"');
+          end;
+        end;
+      end;
+      tkFloat: begin
+        HR(P);
+        if (P^.TypeInfo=TypeInfo(Currency)) and P^.GetterIsField then
+          AddCurr64(PInt64(P^.GetterAddr(Value))^) else
+        if P^.TypeInfo=TypeInfo(TDateTime) then begin
+          if woDateTimeWithMagic in Options then
+            AddNoJSONEscape(@JSON_SQLDATE_MAGIC_QUOTE_VAR,4) else
+            Add('"');
+          AddDateTime(P^.GetDoubleProp(Value));
+          if woDateTimeWithZSuffix in Options then
+            Add('Z');
+          Add('"');
+        end else
+          Add(P^.GetFloatProp(Value),DOUBLE_PRECISION);
+      end;
+      {$ifdef HASVARUSTRING}
+      tkUString: begin // write converted to UTF-8
+        US := P^.GetUnicodeStrProp(Value);
+        if (US<>'') or not (woDontStoreEmptyString in Options) then begin
+          HR(P);
+          Add('"');
+          AddJSONEscapeW(pointer(US));
+          Add('"');
+        end;
+      end;
+      {$endif}
+      tkWString: begin // write converted to UTF-8
+        P^.GetWideStrProp(Value,WS);
+        if (WS<>'') or not (woDontStoreEmptyString in Options) then begin
+          HR(P);
+          Add('"');
+          AddJSONEscapeW(pointer(WS));
+          Add('"');
+        end;
+      end;
+      tkDynArray: begin
+        HR(P);
+        P^.GetDynArray(Value,dyn);
+        dynObjArray := P^.DynArrayIsObjArrayInstance;
+        if dynObjArray<>nil then begin
+          if dyn.Count=0 then begin
+            if woHumanReadableEnumSetAsComment in Options then
+              dynObjArray^.SetCustomComment(CustomComment);
+            Add('[',']');
+          end else begin // do not use AddDynArrayJSON to support HR
+            inc(fHumanReadableLevel);
+            Add('[');
+            for c := 0 to dyn.Count-1 do begin
+              WriteObject(PPointerArray(dyn.Value^)^[c],Options);
+              Add(',');
+            end;
+            CancelLastComma;
+            dec(fHumanReadableLevel);
+            HR;
+            Add(']');
+          end;
+        end else
+          AddDynArrayJSON(dyn);
+      end;
+      {$ifdef PUBLISHRECORD}
+      tkRecord{$ifdef FPC},tkObject{$endif}: begin
+        HR(P);
+        AddRecordJSON(P^.GetFieldAddr(Value)^,P^.PropType^);
+      end;
+      {$endif}
+      {$ifndef NOVARIANTS}
+      tkVariant: begin // stored as JSON, e.g. '1.234' or '"text"'
+        HR(P);
+        P^.GetVariantProp(Value,VVariant);
+        AddVariant(VVariant,twJSONEscape);
+      end;
+      {$endif}
+      tkClass: begin
+        Obj := P^.GetObjProp(Value);
+        case IsObj of
+        oSQLRecord,oSQLMany: // TSQLRecord or inherited
+          if PropIsIDTypeCastedField(P,IsObj,Value) then begin
+            HR(P);
+            Add(PtrInt(Obj)); // not true instances, but ID
+          end else
+          if Obj<>nil then begin
+            HR(P);
+            WriteObject(Obj,Options);
+          end;
+        else // TPersistent or any class defined with $M+
+          if Obj<>nil then begin
+            HR(P);
+            WriteObject(Obj,Options);
+          end;
+        end;
+      end;
+      // tkString (shortstring) and tkInterface is not handled
+    end;
+    if Added then
+      Add(',');
+  end;
+  procedure WritePropsFromRTTI(aClassType: TClass);
+  var i: integer;
+      P: PPropInfo;
+  begin
+    repeat
+      for i := 1 to InternalClassPropInfo(aClassType,P) do begin
+        WriteProp(P);
+        P := P^.Next;
+      end;
+      if woDontStoreInherited in Options then
+        break;
+      aClassType := aClassType.ClassParent;
+    until aClassType=nil;
+  end;
 
-var P: PPropInfo;
-    i, V, c, codepage: integer;
-    V64: Int64;
-    Obj: TObject;
+var i, c: integer;
     List: TList absolute Value;
     {$ifndef LVCL}
     Coll: TCollection absolute Value;
@@ -49645,22 +50531,9 @@ var P: PPropInfo;
     Str: TStrings absolute Value;
     Utf: TRawUTF8List absolute Value;
     Table: TSQLTable absolute Value;
+    parser: PJSONCustomParser;
     aClassType: TClass;
-    Kind: TTypeKind;
     UtfP: PPUtf8CharArray;
-    IsObj: TJSONObject;
-    IsObjCustomIndex: integer;
-    PS: PShortString;
-    WS: WideString;
-    {$ifdef HASVARUSTRING}
-    US: UnicodeString;
-    {$endif}
-    tmp: RawByteString;
-    dyn: TDynArray;
-    dynObjArray: PClassInstance;
-    {$ifndef NOVARIANTS}
-    VVariant: variant;
-    {$endif}
 label next;
 begin
   if not (woHumanReadable in Options) or (fHumanReadableLevel<0) then
@@ -49669,8 +50542,9 @@ begin
     AddShort('null'); // return void object
     exit;
   end;
+  CustomPropName := nil;
   aClassType := PClass(Value)^;
-  IsObj := JSONObject(aClassType,IsObjCustomIndex,[cpWrite]);
+  IsObj := JSONObjectFromClass(aClassType,parser);
   if woFullExpand in Options then
     if IsObj=oSynMonitor then begin // nested values do not need extended info
       exclude(Options,woFullExpand);
@@ -49681,12 +50555,11 @@ begin
     end;
   case IsObj of
   // handle custom class serialization
-  oCustom:
-    with JSONCustomParsers[IsObjCustomIndex] do begin
-      if Assigned(Writer) then
-        Writer(self,Value,Options);
-      exit;
-    end;
+  oCustomReaderWriter: begin
+    if Assigned(parser^.Writer) then
+      parser^.Writer(self,Value,Options);
+    exit;
+  end;
   // handle JSON arrays
   oSQLTable:
     Table.GetJSONValues(Stream,true);
@@ -49785,203 +50658,18 @@ begin
     end;
     end;
   end;
-  repeat
-    for i := 1 to InternalClassPropInfo(aClassType,P) do begin
-      if Assigned(OnWriteObject) and OnWriteObject(self,Value,P,Options) then
-        goto next else
-      if IsObj in [oSQLRecord,oSQLMany] then begin // ignore "stored AS_UNIQUE"
-        if IsRowIDShort(P^.Name) then
-          goto next; // should not happen
-      end else
-        if not (woStoreStoredFalse in Options) and
-           not P^.IsStored(Value) then
-          goto next; // ignore regular "stored false" attribute
-      Added := false;  // HR(P) will write field name and set Added := true
-      Kind := P^.PropType^.Kind;
-      case Kind of
-        tkInt64{$ifdef FPC}, tkQWord{$endif}: begin
-          V64 := P^.GetInt64Prop(Value);
-          if not ((woDontStoreDefault in Options) and (V64=Int64(P^.Default))) then begin
-            HR(P);
-            if woTimeLogAsText in Options then
-              case P^.PropType^.GetSQLFieldType of
-              sftTimeLog,sftModTime,sftCreateTime: begin
-                Add('"');
-                AddTimeLog(@V64);
-                Add('"');
-              end;
-              sftUnixTime: begin
-                Add('"');
-                AddUnixTime(@V64);
-                Add('"');
-              end;
-              else Add(V64);
-              end
-            else Add(V64);
-          end;
+  if IsObj=oCustomPropName then begin
+    if parser^.Props=nil then // has been unregistered
+      WritePropsFromRTTI(aClassType) else
+      if woDontStoreInherited in Options then
+        raise EParsingException.CreateUTF8('%.WriteObject woDontStoreInherited '+
+          'after RegisterCustomSerializerFieldNames(%)', [self,aClassType]) else
+        for i := 0 to length(parser^.Props)-1 do begin
+          CustomPropName := parser^.Fields[i];
+          WriteProp(parser^.Props[i]);
         end;
-        {$ifdef FPC} tkBool, {$endif}
-        tkEnumeration, tkInteger, tkSet: begin
-          V := P^.GetOrdProp(Value);
-          if (V<>P^.Default) or not (woDontStoreDefault in Options) then begin
-            HR(P);
-            if {$ifdef FPC}(Kind=tkBool) or{$endif}
-               ((Kind=tkEnumeration) and (P^.TypeInfo=TypeInfo(boolean))) then
-              Add(boolean(V)) else
-              if (woFullExpand in Options) or (woHumanReadable in Options) or
-                 (woEnumSetsAsText in Options) or
-                 (twoEnumSetsAsTextInRecord in CustomOptions) then
-              case Kind of
-              tkEnumeration:
-              with P^.PropType^.EnumBaseType^ do begin
-                Add('"');
-                PS := GetEnumNameOrd(V);
-                if twoTrimLeftEnumSets in CustomOptions then
-                  AddTrimLeftLowerCase(PS) else
-                  AddShort(PS^);
-                Add('"');
-                if woHumanReadableEnumSetAsComment in Options then
-                  GetEnumNameAll(CustomComment,'',true);
-              end;
-              tkSet:
-              with P^.PropType^.SetEnumType^ do begin
-                GetSetNameCSV(self,V,',',woHumanReadableFullSetsAsStar in Options);
-                if woHumanReadableEnumSetAsComment in Options then
-                  GetEnumNameAll(CustomComment,'"*" or a set of ',true);
-              end;
-              else
-                Add(V);
-              end else
-                Add(V); // typecast enums and sets as plain integer by default
-          end;
-        end;
-        {$ifdef FPC}tkAString,{$endif} tkLString: begin
-          codepage := P^.PropType^.AnsiStringCodePage;
-          if (codepage=CP_SQLRAWBLOB) and not (woSQLRawBlobAsBase64 in Options) then begin
-            if not (woDontStoreEmptyString in Options) then begin
-              HR(P);
-              AddShort('""');
-            end;
-          end else begin
-            P^.GetLongStrProp(Value,tmp);
-            if (tmp<>'') or not (woDontStoreEmptyString in Options) then begin
-              HR(P);
-              Add('"');
-              if (IsObj=oPersistentPassword) and (codepage=CP_UTF8) and
-                 ((woHideSynPersistentPassword in Options) or
-                  (woFullExpand in Options)) and
-                 P^.GetterIsField and (P^.GetterAddr(Value)=
-                   TSynPersistentWithPassword(Value).GetPasswordFieldAddress) then begin
-                if tmp<>'' then
-                  AddShort('***')
-              end else
-                AddAnyAnsiString(tmp,twJSONEscape,codepage);
-              Add('"');
-            end;
-          end;
-        end;
-        tkFloat: begin
-          HR(P);
-          if (P^.TypeInfo=TypeInfo(Currency)) and P^.GetterIsField then
-            AddCurr64(PInt64(P^.GetterAddr(Value))^) else
-          if P^.TypeInfo=TypeInfo(TDateTime) then begin
-            if woDateTimeWithMagic in Options then
-              AddNoJSONEscape(@JSON_SQLDATE_MAGIC_QUOTE_VAR,4) else
-              Add('"');
-            AddDateTime(P^.GetDoubleProp(Value));
-            if woDateTimeWithZSuffix in Options then
-              Add('Z');
-            Add('"');
-          end else
-            Add(P^.GetFloatProp(Value),DOUBLE_PRECISION);
-        end;
-        {$ifdef HASVARUSTRING}
-        tkUString: begin // write converted to UTF-8
-          US := P^.GetUnicodeStrProp(Value);
-          if (US<>'') or not (woDontStoreEmptyString in Options) then begin
-            HR(P);
-            Add('"');
-            AddJSONEscapeW(pointer(US));
-            Add('"');
-          end;
-        end;
-        {$endif}
-        tkWString: begin // write converted to UTF-8
-          P^.GetWideStrProp(Value,WS);
-          if (WS<>'') or not (woDontStoreEmptyString in Options) then begin
-            HR(P);
-            Add('"');
-            AddJSONEscapeW(pointer(WS));
-            Add('"');
-          end;
-        end;
-        tkDynArray: begin
-          HR(P);
-          P^.GetDynArray(Value,dyn);
-          dynObjArray := P^.DynArrayIsObjArrayInstance;
-          if dynObjArray<>nil then begin
-            if dyn.Count=0 then begin
-              if woHumanReadableEnumSetAsComment in Options then
-                CustomComment := FormatUTF8('array of {%}',[
-                  ClassFieldNamesAllPropsAsText(dynObjArray^.ItemClass,true)]);
-              Add('[',']');
-            end else begin // do not use AddDynArrayJSON to support HR
-              inc(fHumanReadableLevel);
-              Add('[');
-              for c := 0 to dyn.Count-1 do begin
-                WriteObject(PPointerArray(dyn.Value^)^[c],Options);
-                Add(',');
-              end;
-              CancelLastComma;
-              dec(fHumanReadableLevel);
-              HR;
-              Add(']');
-            end;
-          end else
-            AddDynArrayJSON(dyn);
-        end;
-        {$ifdef PUBLISHRECORD}
-        tkRecord{$ifdef FPC},tkObject{$endif}: begin
-          HR(P);
-          AddRecordJSON(P^.GetFieldAddr(Value)^,P^.PropType^);
-        end;
-        {$endif}
-        {$ifndef NOVARIANTS}
-        tkVariant: begin // stored as JSON, e.g. '1.234' or '"text"'
-          HR(P);
-          P^.GetVariantProp(Value,VVariant);
-          AddVariant(VVariant,twJSONEscape);
-        end;
-        {$endif}
-        tkClass: begin
-          Obj := P^.GetObjProp(Value);
-          case IsObj of
-          oSQLRecord,oSQLMany: // TSQLRecord or inherited
-            if PropIsIDTypeCastedField(P,IsObj,Value) then begin
-              HR(P);
-              Add(PtrInt(Obj)); // not true instances, but ID
-            end else
-            if Obj<>nil then begin
-              HR(P);
-              WriteObject(Obj,Options);
-            end;
-          else // TPersistent or any class defined with $M+
-            if Obj<>nil then begin
-              HR(P);
-              WriteObject(Obj,Options);
-            end;
-          end;
-        end;
-        // tkString (shortstring) and tkInterface is not handled
-      end;
-      if Added then
-        Add(',');
-next: P := P^.Next;
-    end;
-    if woDontStoreInherited in Options then
-      break;
-    aClassType := aClassType.ClassParent;
-  until aClassType=nil;
+  end else
+    WritePropsFromRTTI(aClassType);
   CancelLastComma;
   dec(fHumanReadableLevel);
   HR;
@@ -50144,7 +50832,7 @@ const LEN: array[-1..2] of byte = (1,16,11,4);
 begin
   if self=nil then
     result := '' else begin
-    result := RawUTF8(ClassName);
+    ToText(self,result);
     system.delete(result,1,LEN[IdemPCharArray(pointer(result),
       ['TSQLVIRTUALTABLE','TSQLVIRTUAL','TSQL'])]);
   end;
@@ -50235,14 +50923,6 @@ begin
   PInt64(@aResult.VCurrency)^ := aValue64^; 
 end;
 
-
-{ TSQLLog }
-
-procedure TSQLLog.CreateLogWriter;
-begin
-  fWriterClass := TJSONSerializer;
-  inherited CreateLogWriter;
-end;
 
 
 { TSQLVirtualTableCursorIndex }
@@ -50977,7 +51657,7 @@ begin
     body.AddNameValuesToObject(['logonid',IDValue,'logonname',LogonName,
       'logondisplay',DisplayName,'logongroup',GroupRights.IDValue,
       'timeout',GroupRights.SessionTimeout,
-      'server',ExeVersion.ProgramName,'version',ExeVersion.Version.Detailed]);
+      'server',ExeVersion.ProgramName,'version',ExeVersion.Version.DetailedOrVoid]);
   Ctxt.ReturnsJson(variant(body),HTTP_SUCCESS,false,twJSONEscape,false,header);
 end;
 
@@ -52218,8 +52898,9 @@ var Params: TJSONSerializer;
     arg, ValLen: integer;
     V: PPointer;
     R, Val: PUTF8Char;
-    valid, wasString, resultAsJSONObject: boolean;
+    wasString, resultAsJSONObject: boolean;
     ServiceCustomAnswerPoint: PServiceCustomAnswer;
+    parser: TJSONToObject;
     DynArrays: array[0..MAX_METHOD_ARGS-1] of TDynArray;
     Value: array[0..MAX_METHOD_ARGS-1] of pointer;
     I64s: array[0..MAX_METHOD_ARGS-1] of Int64;
@@ -52285,16 +52966,16 @@ begin
     end;
     Params.CancelLastComma;
     Params.SetText(ParamsJSON); // without [ ]
-    // call remote server or stub implementation
-    if method^.ArgsResultIsServiceCustomAnswer then
-      ServiceCustomAnswerPoint := Value[method^.ArgsResultIndex] else
-      ServiceCustomAnswerPoint := nil;
-    if not fInvoke(method^,ParamsJSON,
-       @ResArray,@Error,@fClientDrivenID,ServiceCustomAnswerPoint) then
-      RaiseError('''%''',[Error]);
   finally
     Params.Free;
   end;
+  // call remote server or stub implementation
+  if method^.ArgsResultIsServiceCustomAnswer then
+    ServiceCustomAnswerPoint := Value[method^.ArgsResultIndex] else
+    ServiceCustomAnswerPoint := nil;
+  if not fInvoke(method^,ParamsJSON,
+     @ResArray,@Error,@fClientDrivenID,ServiceCustomAnswerPoint) then
+    RaiseError('''%''',[Error]);
   // retrieve method result and var/out parameters content
   if ServiceCustomAnswerPoint=nil then
   if ResArray<>'' then begin
@@ -52326,8 +53007,13 @@ begin
         smvObject: begin
           if PInteger(R)^=NULL_LOW then
             inc(R,4) else begin // null from TInterfacedStub -> stay untouched
-            R := JSONToObject(V^,R,valid);
-            if not valid then
+            parser.From := R;
+            parser.Options := [];
+            parser.TObjectListItemClass := nil;
+            parser.Value := PObject(V)^;
+            parser.Parse;
+            if parser.Valid then
+              R := parser.Dest else
               RaiseError('returned object',[]);
           end;
           IgnoreComma(R);
@@ -52440,8 +53126,8 @@ begin
   {$endif}
   if aCall.MethodIndex>=fFactory.fMethodsCount then
     raise EInterfaceFactoryException.CreateUTF8(
-      '%.FakeCall(%.%) failed: out of range method %>=%',
-      [self,fFactory.fInterfaceTypeInfo^.Name,aCall.MethodIndex,fFactory.fMethodsCount]);
+      '%.FakeCall(%.%) failed: out of range method %>=%',[self,
+      fFactory.fInterfaceTypeInfo^.Name,aCall.MethodIndex,fFactory.fMethodsCount]);
   method := @fFactory.fMethods[aCall.MethodIndex];
   if not Assigned(fInvoke)then
     RaiseError('fInvoke=nil',[]);
@@ -52532,8 +53218,8 @@ begin // here aClientDrivenID^ = FakeCall ID
     exit;
   end;
   if not Assigned(fServer.OnNotifyCallback) then
-    raise EServiceException.CreateUTF8('% does not implement callbacks for I%',
-      [fServer,aMethod.InterfaceDotMethodName]);
+    raise EServiceException.CreateUTF8('%(%) does not support callbacks for I%',
+      [fServer,fServer.Model.Root,aMethod.InterfaceDotMethodName]);
   if fReleasedOnClientSide then begin
     if not IdemPropName(fFactory.fInterfaceTypeInfo^.Name,'ISynLogCallback') then
       fServer.InternalLog('%.CallbackInvoke: % instance has been released on '+
@@ -52614,7 +53300,7 @@ end;
 { TInterfaceFactory }
 
 function TypeInfoToMethodValueType(P: PTypeInfo): TServiceMethodValueType;
-var IsObjCustomIndex: integer;
+var parser: PJSONCustomParser;
 begin
   result := smvNone;
   if P<>nil then
@@ -52668,10 +53354,10 @@ begin
     result := smvWideString;
   tkClass:
     with P^.ClassType^ do
-    if ClassHasPublishedFields(ClassType) or
-       (JSONObject(ClassType,IsObjCustomIndex,[cpRead,cpWrite]) in
+    if ClassHasPublishedFields(ClassType) or // = oPersistent or oCustomPropName
+       (JSONObjectFromClass(ClassType,parser) in // serialized w/o RTTI ?
          [{$ifndef LVCL}oCollection,{$endif}oObjectList,oUtfs,oStrings,
-          oException,oCustom]) then
+          oException,oCustomReaderWriter]) then
       result := smvObject; // JSONToObject/ObjectToJSON types
   {$ifdef FPC}tkObject,{$endif} tkRecord:
     // Base64 encoding of our RecordLoad / RecordSave binary format
@@ -53885,27 +54571,32 @@ type
   protected
     fTimer: TSQLRestBackgroundTimer;
     fDest: IInvokable;
+    fOnResult: TOnAsynchRedirectResult;
     function FakeInvoke(const aMethod: TServiceMethod; const aParams: RawUTF8;
       aResult, aErrorMsg: PRawUTF8; aClientDrivenID: PCardinal;
       aServiceCustomAnswer: PServiceCustomAnswer): boolean; override;
   public
     constructor Create(aTimer: TSQLRestBackgroundTimer; aFactory: TInterfaceFactory;
-      const aDestinationInterface: IInvokable; out aCallbackInterface);
+      const aDestinationInterface: IInvokable; out aCallbackInterface;
+      const aOnResult: TOnAsynchRedirectResult);
   end;
   TInterfacedObjectAsynchCall = packed record
     Method: PServiceMethod;
     Instance: pointer; // weak IInvokable reference
     Params: RawUTF8;
+    OnOutputParamsCopy: RawUTF8;
+    OnOutput: TOnAsynchRedirectResult;
   end;
 
 constructor TInterfacedObjectAsynch.Create(aTimer: TSQLRestBackgroundTimer;
   aFactory: TInterfaceFactory; const aDestinationInterface: IInvokable;
-  out aCallbackInterface);
+  out aCallbackInterface; const aOnResult: TOnAsynchRedirectResult);
 begin
   fTimer := aTimer;
   fRest := fTimer.fRest;
-  fName := fTimer.fName;
+  fName := fTimer.fThreadName;
   fDest := aDestinationInterface;
+  fOnResult := aOnResult;
   inherited Create(aFactory,[ifoJsonAsExtended],FakeInvoke,nil);
   Get(aCallbackInterface);
 end;
@@ -53923,6 +54614,11 @@ begin
   call.Method := @aMethod;
   call.Instance := pointer(fDest);
   call.Params := aParams;
+  if Assigned(fOnResult) then begin
+    SetString(call.OnOutputParamsCopy,PAnsiChar(pointer(aParams)),length(aParams));
+    call.OnOutput := fOnResult;
+  end else
+    call.OnOutput := nil;
   msg := RecordSave(call,TypeInfo(TInterfacedObjectAsynchCall));
   result := fTimer.EnQueue(fTimer.AsynchBackgroundExecute,msg,true);
 end;
@@ -53932,60 +54628,113 @@ end;
 
 constructor TSQLRestBackgroundTimer.Create(aRest: TSQLRest;
   const aThreadName: RawUTF8; aStats: TSynMonitorClass);
+var aName: RawUTF8;
 begin
   if aRest=nil then
-    raise EORMException.CreateUTF8('%.Create(nil,"%")',[self,aThreadName]);
+    raise EORMException.CreateUTF8('%.Create(aRest=nil,"%")',[self,aThreadName]);
   fRest := aRest;
   if aThreadName<>'' then
-    fName := aThreadName else
-    FormatUTF8('% % Timer',[self,fRest.Model.Root],fName);
-  inherited Create(fName,fRest.BeginCurrentThread,fRest.EndCurrentThread,aStats);
+    aName := aThreadName else
+    FormatUTF8('% %',[self, fRest.Model.Root],aName);
+  inherited Create(aName,fRest.BeginCurrentThread,fRest.EndCurrentThread,aStats);
 end;
 
 destructor TSQLRestBackgroundTimer.Destroy;
 begin
+  AsynchBatchStop(nil);
   inherited Destroy;
-  fBackgroundBatch.Free;
+end;
+
+function TSQLRestBackgroundTimer.AsynchBatchIndex(aTable: TSQLRecordClass): integer;
+begin
+  if (self=nil) or (fBackgroundBatch=nil) then
+    result := -1 else begin
+    result := fRest.Model.GetTableIndexExisting(aTable);
+    if (result>=length(fBackgroundBatch)) or (fBackgroundBatch[result]=nil) then
+      result := -1;
+  end;
+end;
+
+function TSQLRestBackgroundTimer.AsynchBatchLocked(aTable: TSQLRecordClass;
+  out aBatch: TSQLRestBatchLocked): boolean;
+var b: integer;
+begin
+  b := AsynchBatchIndex(aTable);
+  if b>=0 then begin
+    aBatch := fBackgroundBatch[b];
+    aBatch.Safe.Lock;
+    result := true;
+  end else
+    result := false;
+end;
+
+procedure TSQLRestBackgroundTimer.AsynchBatchUnLock(aBatch: TSQLRestBatchLocked);
+begin
+  try
+    if aBatch.Count>=aBatch.Threshold then
+      ExecuteNow(AsynchBatchExecute);
+  finally
+    aBatch.Safe.UnLock;
+  end;
 end;
 
 procedure TSQLRestBackgroundTimer.AsynchBatchExecute(Sender: TSynBackgroundTimer;
   Event: TWaitResult; const Msg: RawUTF8);
-var data: RawUTF8;
+var data, tablename: RawUTF8;
     table: TSQLRecordClass;
-    count, status: integer;
+    batch: TSQLRestBatchLocked;
+    b, count, status: integer;
     res: TIDDynArray;
     {$ifdef WITHLOG}
     log: ISynLog; // for Enter auto-leave to work with FPC
     {$endif}
 begin
-  if fBackgroundBatch<>nil then
   try
-    fBackgroundBatch.Safe.Lock;
-    try
-      table := fBackgroundBatch.Table;
-      count := fBackgroundBatch.Count;
-      if count>0 then
+    // send any pending data
+    for b := 0 to high(fBackgroundBatch) do begin
+      batch := fBackgroundBatch[b];
+      if batch.Count=0 then
+        continue;
+      batch.Safe.Lock;
       try
-        {$ifdef WITHLOG}
-        log := fRest.LogClass.Enter('AsynchBatchExecute [%] % count=%',
-          [fName,table,count],self);
-        {$endif}
-        fBackgroundBatch.PrepareForSending(data);
+        table := batch.Table;
+        count := batch.Count;
+        if count>0 then
+        try
+          {$ifdef WITHLOG}
+          if log=nil then
+            log := fRest.LogClass.Enter('AsynchBatchExecute % count=%',
+              [table,count],self);
+          {$endif}
+          batch.PrepareForSending(data);
+        finally
+          batch.Reset;
+        end;
       finally
-        fBackgroundBatch.Reset;
+        batch.Safe.UnLock;
       end;
-    finally
-      fBackgroundBatch.Safe.UnLock;
-    end;
-    // inlined TSQLRest.BatchSend for lower contention
-    if data<>'' then begin
-      status := fRest.EngineBatchSend(table,data,res,count); // may take a while
-      fRest.InternalLog('AsynchBatchExecute [%] EngineBatchSend=%',[fName,status]);
+      // inlined TSQLRest.BatchSend for lower contention
+      if data<>'' then
+      try
+        status := fRest.EngineBatchSend(table,data,res,count); // may take a while
+        fRest.InternalLog('AsynchBatchExecute % EngineBatchSend=%',[table,status]);
+      except
+        on E: Exception do
+          fRest.InternalLog('% during AsynchBatchExecute %',[E.ClassType,table],sllWarning);
+      end;
     end;
   finally
-    if Msg='free' then begin
-      fRest.InternalLog('AsynchBatchExecute [%] "free"',[fName]);
-      FreeAndNil(fBackgroundBatch);
+    if IdemPChar(pointer(Msg),'FREE@') then begin // from AsynchBatchStop()
+      fRest.InternalLog('AsynchBatchExecute %',[Msg]);
+      tablename := copy(Msg,6,127);
+      if tablename='' then
+        // AsynchBatchStop(nil)
+        ObjArrayClear(fBackgroundBatch,true) else begin
+        // AsynchBatchStop(table)
+        b := fRest.Model.GetTableIndex(tablename);
+        if b<length(fBackgroundBatch) then
+          FreeAndNil(fBackgroundBatch[b]);
+      end;
     end;
   end;
 end;
@@ -53993,21 +54742,27 @@ end;
 function TSQLRestBackgroundTimer.AsynchBatchStart(Table: TSQLRecordClass;
   SendSeconds, PendingRowThreshold, AutomaticTransactionPerRow: integer;
   Options: TSQLRestBatchOptions): boolean;
+var b: Integer;
 begin
   result := false;
-  if (self=nil) or (fBackgroundBatch<>nil) or (SendSeconds<=0) then
+  if (self=nil) or (SendSeconds<=0) then
     exit;
-  fRest.InternalLog('AsynchBatchStart(%,%,%) on [%] using %',
-    [Table,SendSeconds,PendingRowThreshold,fName,self],sllDebug);
+  b := fRest.Model.GetTableIndexExisting(Table);
+  if (fBackgroundBatch<>nil) and (fBackgroundBatch[b]<>nil) then
+    exit; // already defined for this Table
+  fRest.InternalLog('AsynchBatchStart(%,%,%)',[Table,SendSeconds,PendingRowThreshold],sllDebug);
   Enable(AsynchBatchExecute,SendSeconds);
-  fBackgroundBatch := TSQLRestBatchLocked.Create(
+  if fBackgroundBatch=nil then
+    SetLength(fBackgroundBatch,fRest.Model.TablesMax+1);
+  fBackgroundBatch[b] := TSQLRestBatchLocked.Create(
     fRest,Table,AutomaticTransactionPerRow,Options);
-  fBackgroundBatch.Threshold := PendingRowThreshold;
+  fBackgroundBatch[b].Threshold := PendingRowThreshold;
   result := true;
 end;
 
-function TSQLRestBackgroundTimer.AsynchBatchStop: boolean;
-var timeout: Int64;
+function TSQLRestBackgroundTimer.AsynchBatchStop(Table: TSQLRecordClass): boolean;
+var b: integer;
+    timeout: Int64;
     {$ifdef WITHLOG}
     log: ISynLog; // for Enter auto-leave to work with FPC
     {$endif}
@@ -54016,72 +54771,116 @@ begin
   if (self=nil) or (fBackgroundBatch=nil) then
     exit;
   {$ifdef WITHLOG}
-  log := fRest.LogClass.Enter('AsynchBatchStop(%) on [%]',[fBackgroundBatch.Table,fName],self);
+  log := fRest.LogClass.Enter('AsynchBatchStop(%)',[Table],self);
   {$endif}
-  if not EnQueue(AsynchBatchExecute,'free',true) then
-    exit;
   timeout := GetTickCount64+5000;
-  repeat
-    sleep(1); // wait for all pending rows to be sent
-  until (fBackgroundBatch=nil) or (GetTickCount64>timeout);
-  result := Disable(AsynchBatchExecute);
+  if Table=nil then begin // e.g. from TSQLRest.Destroy
+    if not EnQueue(AsynchBatchExecute,'free@',true) then
+      exit;
+    repeat
+      sleep(1); // wait for all batchs to be released
+    until (fBackgroundBatch=nil) or (GetTickCount64>timeout);
+    result := Disable(AsynchBatchExecute);
+  end else begin
+    b := AsynchBatchIndex(Table);
+    if (b<0) or not EnQueue(AsynchBatchExecute,'free@'+Table.SQLTableName,true) then
+      exit;
+    repeat
+      sleep(1); // wait for all pending rows to be sent
+    until (fBackgroundBatch[b]=nil) or (GetTickCount64>timeout);
+    if ObjArrayCount(fBackgroundBatch)>0 then
+      result := true else begin
+      result := Disable(AsynchBatchExecute);
+      if result then
+        ObjArrayClear(fBackgroundBatch,true);
+    end;
+  end;
 end;
 
 function TSQLRestBackgroundTimer.AsynchBatchAdd(Value: TSQLRecord; SendData,ForceID: boolean;
   const CustomFields: TSQLFieldBits; DoNotAutoComputeFields: boolean): integer;
+var b: TSQLRestBatchLocked;
 begin
   result := -1;
-  if (self=nil) or (fBackgroundBatch=nil) then
+  if (self=nil) or (fBackgroundBatch=nil) or (Value=nil) then
     exit;
   fRest.InternalLog('AsynchBatchAdd %',[Value],sllDebug);
-  fBackgroundBatch.Safe.Lock;
-  try
-    result := fBackgroundBatch.Add(
-      Value,SendData,ForceID,CustomFields,DoNotAutoComputeFields);
-    if result>=fBackgroundBatch.Threshold then
-      ExecuteNow(AsynchBatchExecute);
-  finally
-    fBackgroundBatch.Safe.UnLock;
-  end;
+  if AsynchBatchLocked(Value.RecordClass,b) then
+    try
+      result := b.Add(Value,SendData,ForceID,CustomFields,DoNotAutoComputeFields);
+    finally
+      AsynchBatchUnLock(b);
+    end;
+end;
+
+function TSQLRestBackgroundTimer.AsynchBatchRawAdd(Table: TSQLRecordClass;
+  const SentData: RawUTF8): integer;
+var b: TSQLRestBatchLocked;
+begin
+  result := -1;
+  if (self=nil) or (fBackgroundBatch=nil) or (Table=nil) then
+    exit;
+  fRest.InternalLog('AsynchBatchRawAdd % %',[Table,SentData],sllDebug);
+  if AsynchBatchLocked(Table,b) then
+    try
+      result := b.RawAdd(SentData);
+    finally
+      AsynchBatchUnLock(b);
+    end;
+end;
+
+procedure TSQLRestBackgroundTimer.AsynchBatchRawAppend(Table: TSQLRecordClass;
+  SentData: TTextWriter);
+var b: TSQLRestBatchLocked;
+begin
+  if (self=nil) or (fBackgroundBatch=nil) or (Table=nil) or (SentData=nil) then
+    exit;
+  fRest.InternalLog('AsynchBatchRawAppend %',[Table],sllDebug);
+  if AsynchBatchLocked(Table,b) then
+    try
+      b.RawAppend.AddNoJSONEscape(SentData);
+    finally
+      AsynchBatchUnLock(b);
+    end;
 end;
 
 function TSQLRestBackgroundTimer.AsynchBatchUpdate(Value: TSQLRecord;
   const CustomFields: TSQLFieldBits; DoNotAutoComputeFields: boolean): integer;
+var b: TSQLRestBatchLocked;
 begin
   result := -1;
-  if (self=nil) or (fBackgroundBatch=nil) then
+  if (self=nil) or (fBackgroundBatch=nil) or (Value=nil) then
     exit;
   fRest.InternalLog('AsynchBatchUpdate %',[Value],sllDebug);
-  fBackgroundBatch.Safe.Lock;
-  try
-    result := fBackgroundBatch.Update(Value,CustomFields,DoNotAutoComputeFields);
-    if result>=fBackgroundBatch.Threshold then
-      ExecuteNow(AsynchBatchExecute);
-  finally
-    fBackgroundBatch.Safe.UnLock;
-  end;
+  if AsynchBatchLocked(Value.RecordClass,b) then
+    try
+      result := b.Update(Value,CustomFields,DoNotAutoComputeFields);
+    finally
+      AsynchBatchUnLock(b);
+    end;
 end;
 
 function TSQLRestBackgroundTimer.AsynchBatchDelete(Table: TSQLRecordClass; ID: TID): integer;
+var b: TSQLRestBatchLocked;
 begin
   result := -1;
   if (self=nil) or (fBackgroundBatch=nil) then
     exit;
   fRest.InternalLog('AsynchBatchDelete % %',[Table,ID],sllDebug);
-  fBackgroundBatch.Safe.Lock;
-  try
-    result := fBackgroundBatch.Delete(Table,ID);
-    if result>=fBackgroundBatch.Threshold then
-      ExecuteNow(AsynchBatchExecute);
-  finally
-    fBackgroundBatch.Safe.UnLock;
-  end;
+  if AsynchBatchLocked(Table,b) then
+    try
+      result := b.Delete(Table,ID);
+    finally
+      AsynchBatchUnLock(b);
+    end;
 end;
 
 procedure TSQLRestBackgroundTimer.AsynchBackgroundExecute(Sender: TSynBackgroundTimer;
   Event: TWaitResult; const Msg: RawUTF8);
 var exec: TServiceMethodExecute;
     call: TInterfacedObjectAsynchCall;
+    o: PRawUTF8;
+    output: RawUTF8;
     {$ifdef WITHLOG}
     log: ISynLog; // for Enter auto-leave to work with FPC
     {$endif}
@@ -54094,16 +54893,23 @@ begin
   {$endif}
   exec := TServiceMethodExecute.Create(call.Method);
   try
-    if not exec.ExecuteJsonCallback(call.Instance,call.Params) then
+    if Assigned(call.OnOutput) then
+      o := @output else
+      o := nil;
+    if not exec.ExecuteJsonCallback(call.Instance,call.Params, o) then
       fRest.InternalLog('%.AsynchBackgroundExecute %: ExecuteJsonCallback failed',
-        [ClassType,call.Method^.InterfaceDotMethodName],sllWarning);
+        [ClassType,call.Method^.InterfaceDotMethodName],sllWarning) else
+      if o<>nil then
+        call.OnOutput(call.Method^,IInvokable(call.Instance),
+          call.OnOutputParamsCopy,output);
   finally
     exec.Free;
   end;
 end;
 
 procedure TSQLRestBackgroundTimer.AsynchRedirect(const aGUID: TGUID;
-  const aDestinationInterface: IInvokable; out aCallbackInterface);
+  const aDestinationInterface: IInvokable; out aCallbackInterface;
+  const aOnResult: TOnAsynchRedirectResult);
 var factory: TInterfaceFactory;
 begin
   factory := TInterfaceFactory.Get(aGUID);
@@ -54115,19 +54921,57 @@ begin
   fRest.InternalLog('AsynchRedirect % to % using %',[factory.InterfaceName,
     ObjectFromInterface(aDestinationInterface),self]);
   Enable(AsynchBackgroundExecute,3600);
-  TInterfacedObjectAsynch.Create(self,factory,aDestinationInterface,aCallbackInterface);
+  TInterfacedObjectAsynch.Create(self,factory,aDestinationInterface,aCallbackInterface,aOnResult);
 end;
 
 procedure TSQLRestBackgroundTimer.AsynchRedirect(const aGUID: TGUID;
-  const aDestinationInstance: TInterfacedObject; out aCallbackInterface);
+  const aDestinationInstance: TInterfacedObject; out aCallbackInterface;
+  const aOnResult: TOnAsynchRedirectResult);
 var dest: IInvokable;
 begin
   if aDestinationInstance=nil then
     raise EInterfaceFactoryException.CreateUTF8('%.AsynchRedirect(nil)',[self]);
   if not aDestinationInstance.GetInterface(aGUID,dest) then
     raise EInterfaceFactoryException.CreateUTF8('%.AsynchRedirect [%]: % is not a %',
-      [self,fName,aDestinationInstance.ClassType,GUIDToShort(aGUID)]);
-  AsynchRedirect(aGUID,dest,aCallbackInterface);
+      [self,fThreadName,aDestinationInstance,GUIDToShort(aGUID)]);
+  AsynchRedirect(aGUID,dest,aCallbackInterface,aOnResult);
+end;
+
+procedure TSQLRestBackgroundTimer.AsynchBackgroundInterning(
+  Sender: TSynBackgroundTimer; Event: TWaitResult; const Msg: RawUTF8);
+var i, claimed, total: integer;
+    timer: TPrecisionTimer;
+begin
+  timer.Start;
+  claimed := 0;
+  for i := 0 to high(fBackgroundInterning) do
+    inc(claimed,fBackgroundInterning[i].Clean(fBackgroundInterningMaxRefCount));
+  if claimed=0 then
+    exit; // nothing to collect
+  total := claimed;
+  for i := 0 to high(fBackgroundInterning) do
+    inc(total,fBackgroundInterning[i].Count);
+  fRest.InternalLog('%.AsynchInterning: Clean(%) claimed %/% strings from % pools in %',
+    [ClassType,fBackgroundInterningMaxRefCount,claimed,total,
+     length(fBackgroundInterning),timer.Stop],sllDebug);
+end;
+
+procedure TSQLRestBackgroundTimer.AsynchInterning(Interning: TRawUTF8Interning;
+  InterningMaxRefCount, PeriodMinutes: integer);
+begin
+  if (self=nil) or (Interning=nil) then
+    exit;
+  fTaskLock.Lock;
+  try
+    if (InterningMaxRefCount<=0) or (PeriodMinutes<=0) then
+      ObjArrayDelete(fBackgroundInterning,Interning) else begin
+      fBackgroundInterningMaxRefCount := InterningMaxRefCount;
+      ObjArrayAddOnce(fBackgroundInterning,Interning);
+      Enable(AsynchBackgroundInterning,PeriodMinutes*60);
+    end;
+  finally
+    fTaskLock.UnLock;
+  end;
 end;
 
 
@@ -54212,7 +55056,7 @@ begin
     raise EInterfaceFactoryException.CreateUTF8('%.Redirect(nil)',[self]);
   if not aCallback.GetInterface(fFakeCallback.fFactory.fInterfaceIID,dest) then
     raise EInterfaceFactoryException.CreateUTF8('%.Redirect [%]: % is not a %',
-      [self,fFakeCallback.fName,aCallback.ClassType,fFakeCallback.fFactory.fInterfaceName]);
+      [self,fFakeCallback.fName,aCallback,fFakeCallback.fFactory.fInterfaceName]);
   Redirect(dest,aMethodsNames,aSubscribe);
 end;
 
@@ -54375,7 +55219,7 @@ begin
     isReturns:
       Values := '['+AValues+']';
     isFails:
-      Values := RawUTF8(Sender.ClassName)+' returned error: '+aValues;
+      Values := ToText(Sender.ClassType)+' returned error: '+aValues;
     else
       Values := aValues;
     end;
@@ -56103,7 +56947,7 @@ begin
   if instance=nil then
     result := false else begin
     if callbacktext<>nil then
-      Append(callbacktext^,PShortString(PPointer(PPtrInt(instance)^+vmtClassName)^)^);
+      Append(callbacktext^,ClassNameShort(instance)^);
     result := (instance.ClassType=TInterfacedObjectFakeServer) and
               TInterfacedObjectFakeServer(instance).fReleasedOnClientSide;
   end;
@@ -56627,18 +57471,6 @@ begin
     Rest.InternalLog('%.Destroy for I% %: fInstanceCount=%',[ClassType,fInterfaceURI,
       ToText(InstanceCreation)^,fInstanceCount],sllDebug);
   try
-    for i := 0 to High(fLogRestBatch) do begin
-      with fLogRestBatch[i] do begin
-        Safe.Lock;
-        try
-          if Count>0 then
-            Rest.BatchSend(fLogRestBatch[i]);
-        finally
-          Safe.Unlock;
-        end;
-      end;
-      FreeAndNil(fLogRestBatch[i]);
-    end;
     EnterCriticalSection(fInstanceLock);
     try // release any internal instance (should have been done by client)
       try
@@ -56898,9 +57730,12 @@ begin
     end;
     smsAfter: begin
       W.AddShort('},Output:{');
-      if fExcludeServiceLogCustomAnswer and ArgsResultIsServiceCustomAnswer then begin
-        W.AddShort('customanswerlen:');
-        W.Add(length(PServiceCustomAnswer(Sender.Values[ArgsResultIndex])^.Content));
+      if fExcludeServiceLogCustomAnswer and ArgsResultIsServiceCustomAnswer then
+      with PServiceCustomAnswer(Sender.Values[ArgsResultIndex])^ do begin
+        W.AddShort('len:');
+        W.Add(length(Content));
+        W.AddShort(',status:');
+        W.Add(Status);
       end else
       if optNoLogOutput in Sender.fOptions then
         W.AddShort('optNoLog:true') else
@@ -56950,7 +57785,6 @@ var Inst: TServiceFactoryServerInstance;
   end;
   procedure FinalizeLogRest;
   var W: TTextWriter;
-      context: PServiceRunningContext;
   begin
     W := exec.TempTextWriter;
     if exec.CurrentStep<smsBefore then begin
@@ -56962,23 +57796,7 @@ var Inst: TServiceFactoryServerInstance;
     W.Add('},Session:%,User:%,Time:%,MicroSec:%},',
       [integer(Ctxt.Session),Ctxt.SessionUser,TimeLogNowUTC,timeEnd]);
     with Ctxt.ServiceExecution^ do
-    try
-      LogRestBatch.Safe.Lock;
-      LogRestBatch.RawAppend.AddNoJSONEscape(W);
-      if (LogRestBatch.Count>=500) or // write every second or after 500 rows
-         (GetTickCount64-LogRestBatch.ResetTix>1000) then begin
-        context := @ServiceContext;
-        context^.Request := nil; // avoid IsNotAllowed unexpected failure
-        try
-          LogRest.BatchSend(LogRestBatch);
-          LogRestBatch.Reset;
-        finally
-          context^.Request := Ctxt;
-        end;
-      end;
-    finally
-      LogRestBatch.Safe.UnLock;
-    end;
+      LogRest.AsynchBatchRawAppend(LogClass,W);
   end;
 
 begin
@@ -57049,32 +57867,32 @@ begin
       end;
       instancePtr := PAnsiChar(Inst.Instance)+entry^.IOffset;
     end;
-    if optExecInPerInterfaceThread in Ctxt.ServiceExecution.Options then
+    if optExecInPerInterfaceThread in Ctxt.ServiceExecution^.Options then
       if fBackgroundThread=nil then
         fBackgroundThread := Rest.NewBackgroundThreadMethod(
           '% %',[self,fInterface.fInterfaceName]);
     WR := TJSONSerializer.CreateOwnedStream;
     try
       Ctxt.fThreadServer^.Factory := self;
-      if not(optForceStandardJSON in Ctxt.ServiceExecution.Options) and
+      if not(optForceStandardJSON in Ctxt.ServiceExecution^.Options) and
          ((Ctxt.Call.InHead='') or (Ctxt.ClientKind=ckFramework)) then
         include(WR.fCustomOptions,twoForceJSONExtended) else
         include(WR.fCustomOptions,twoForceJSONStandard); // AJAX
       // root/calculator {"method":"add","params":[1,2]} -> {"result":[3],"id":0}
       Ctxt.ServiceResultStart(WR);
-      dolock := optExecLockedPerInterface in Ctxt.ServiceExecution.Options;
+      dolock := optExecLockedPerInterface in Ctxt.ServiceExecution^.Options;
       if dolock then
         EnterCriticalSection(fInstanceLock);
       exec := TServiceMethodExecute.Create(@fInterface.fMethods[Ctxt.ServiceMethodIndex]);
       try
-        exec.fOptions := Ctxt.ServiceExecution.Options;
+        exec.fOptions := Ctxt.ServiceExecution^.Options;
         {$ifndef LVCL}
         exec.fBackgroundExecutionThread := fBackgroundThread;
         {$endif}
         exec.fOnCallback := Ctxt.ExecuteCallback;
         if fOnExecute<>nil then
           MultiEventMerge(exec.fOnExecute,fOnExecute);
-        if Ctxt.ServiceExecution.LogRest<>nil then
+        if Ctxt.ServiceExecution^.LogRest<>nil then
           exec.AddInterceptor(OnLogRestExecuteMethod);
         if (fImplementationClassKind=ickFake) and
            ((Ctxt.ServiceParameters=nil) or (Ctxt.ServiceParameters^='[')) and
@@ -57135,7 +57953,7 @@ begin
         timeEnd := 0;
     finally
       if exec<>nil then begin
-        if Ctxt.ServiceExecution.LogRest<>nil then
+        if Ctxt.ServiceExecution^.LogRest<>nil then
           FinalizeLogRest;
         exec.Free;
       end;
@@ -57318,43 +58136,22 @@ end;
 procedure TServiceFactoryServer.SetServiceLogByIndex(
   const aMethods: TInterfaceFactoryMethodBits; aLogRest: TSQLRest;
   aLogClass: TSQLRecordServiceLogClass);
-  procedure SetEntry(i,ndx: integer);
-  var j: integer;
-  begin
-    with fExecution[i] do begin
-      if LogRestBatch.Count>0 then begin
-        LogRest.BatchSend(LogRestBatch);
-        LogRestBatch.Reset;
-      end;
-      LogRest := aLogRest;
-      LogClassModelIndex := ndx;
-      if LogRest=nil then
-        exit;
-      for j := 0 to High(fLogRestBatch) do
-        if fLogRestBatch[j].Rest=LogRest then begin
-          LogRestBatch := fLogRestBatch[j];
-          exit; // already assigned to the very same TSQLRest instance
-        end;
-      LogRestBatch := TSQLRestBatchLocked.Create(LogRest,
-        LogRest.Model.Tables[ndx],10000);
-      ObjArrayAdd(fLogRestBatch,LogRestBatch);
-    end;
-  end;
-var i,ndx: integer;
+var m: integer;
 begin
   if aLogRest=nil then
-    ndx := -1 else
-    with aLogRest.Model do
-      if aLogClass=nil then begin
-        ndx := GetTableIndexInheritsFrom(TSQLRecordServiceLog);
-        if ndx<0 then
-          raise EModelException.CreateUTF8('%.SetServiceLog: Missing '+
-            'TSQLRecordServiceLog class in %.Model',[self,aLogRest]);
-      end else
-        ndx := GetTableIndexExisting(aLogClass);
-  for i := 0 to fInterface.fMethodsCount-1 do
-    if i in aMethods then
-      SetEntry(i,ndx);
+    aLogClass := nil else begin
+    if aLogClass=nil then
+      aLogClass := TSQLRecordServiceLog;
+    aLogRest.Model.GetTableIndexExisting(aLogClass);
+  end;
+  for m := 0 to fInterface.fMethodsCount-1 do
+    if m in aMethods then
+    with fExecution[m] do begin
+      LogRest := aLogRest;
+      LogClass := aLogClass;
+    end;
+  if aLogRest<>nil then // write every second or after 500 rows in background
+    aLogRest.AsynchBatchStart(aLogClass,1,500,1000); // do nothing if already set
 end;
 
 procedure TServiceFactoryServer.AddInterceptor(const Hook: TServiceMethodExecuteEvent);
@@ -57591,7 +58388,7 @@ procedure TServiceMethodArgument.AddAsVariant(var Dest: TDocVariantData; V: poin
 var tmp: variant;
 begin
   AsVariant(tmp,V,Dest.Options);
-  if Dest.Kind=dvArray then
+  if dvoIsArray in Dest.Options then
     Dest.AddItem(tmp) else
     Dest.AddValue(ShortStringToAnsi7String(ParamName^),tmp);
 end;
@@ -57737,7 +58534,7 @@ begin
 end;
 
 function AutoDestroyFields(self: TObject): TAutoCreateFields;
-  {$ifdef HASINLINE}inline;{$endif}
+  {$ifdef HASINLINENOTX86}inline;{$endif}
 var i: integer;
 begin
   result := PPointer(PPtrInt(self)^+vmtAutoTable)^;
@@ -57803,6 +58600,10 @@ destructor TSynAutoCreateFields.Destroy;
 begin
   AutoDestroyFields(self);
   inherited Destroy;
+end;
+
+procedure TSynAutoCreateFields.AfterLoad;
+begin
 end;
 
 
@@ -58615,19 +59416,22 @@ begin
 end;
 
 function TServiceMethodExecute.ExecuteJsonCallback(Instance: pointer;
-  const params: RawUTF8): boolean;
+  const params: RawUTF8; output: PRawUTF8): boolean;
 var tmp: TSynTempBuffer;
     fake: TInterfacedObjectFake;
+    WR: TTextwriter;
     n: integer;
 begin
   result := false;
-  if (Instance=nil) or (fMethod^.ArgsOutputValuesCount>0) then
+  if Instance=nil then
     exit;
   if (PCardinal(PPointer(PPointer(Instance)^)^)^=
       PCardinal(@TInterfacedObjectFake.FakeQueryInterface)^) then begin
     fake := TInterfacedObjectFake(Instance).SelfFromInterface;
     if Assigned(fake.fInvoke) then begin // bypass all JSON marshalling
-      result := fake.fInvoke(fMethod^,params,nil,nil,nil,nil);
+      if (output=nil) and (fMethod^.ArgsOutputValuesCount>0) then
+        exit; // ensure a function has a TOnAsynchRedirectResult callback
+      result := fake.fInvoke(fMethod^,params,output,nil,nil,nil);
       exit;
     end;
   end;
@@ -58636,7 +59440,16 @@ begin
   PAnsiChar(tmp.buf)[0] := '[';
   MoveFast(pointer(params)^,PAnsiChar(tmp.buf)[1],n);
   PWord(PAnsiChar(tmp.buf)+n+1)^ := ord(']'); // ']'#0
-  result := ExecuteJson([Instance],tmp.buf,nil);
+  if output<>nil then begin
+    WR := TempTextWriter;
+    WR.CancelAll;
+  end else
+    if fMethod^.ArgsOutputValuesCount>0 then
+      exit else // ensure a function has a TOnAsynchRedirectResult callback
+      WR := nil;
+  result := ExecuteJson([Instance],tmp.buf,WR);
+  if WR<>nil then
+    WR.SetText(output^);
   tmp.Done;
 end;
 
@@ -58681,29 +59494,33 @@ begin
       '[': // input arguments as a JSON array , e.g. '[1,2,"three"]' (default)
         inc(Par);
       '{': begin // retrieve parameters values from JSON object
-        inc(Par);
-        ParObjValuesUsed := true;
-        FillCharFast(ParObjValues,(ArgsInLast+1)*sizeof(pointer),0); // := nil
-        a1 := ArgsInFirst;
-        repeat
-          Name := GetJSONPropName(Par,@NameLen);
-          if Name=nil then
-            exit; // invalid JSON object in input
-          Val := Par;
-          Par := GotoNextJSONItem(Par,1,@EndOfObject);
-          for a := a1 to ArgsInLast do
-          with Args[a] do
-          if ValueDirection<>smdOut then
-            if IdemPropName(ParamName^,Name,NameLen) then begin
-              ParObjValues[a] := Val; // fast redirection, without allocation
-              if a=a1 then
-                inc(a1); // enable optimistic O(1) search for in-order input
-              break;
-            end;
-        until (Par=nil) or (EndOfObject='}');
+        repeat inc(Par) until not(Par^ in [#1..' ']);
+        if Par<>'}' then begin
+          ParObjValuesUsed := true;
+          FillCharFast(ParObjValues,(ArgsInLast+1)*sizeof(pointer),0); // := nil
+          a1 := ArgsInFirst;
+          repeat
+            Name := GetJSONPropName(Par,@NameLen);
+            if Name=nil then
+              exit; // invalid JSON object in input
+            Val := Par;
+            Par := GotoNextJSONItem(Par,1,@EndOfObject);
+            for a := a1 to ArgsInLast do
+            with Args[a] do
+            if ValueDirection<>smdOut then
+              if IdemPropName(ParamName^,Name,NameLen) then begin
+                ParObjValues[a] := Val; // fast redirection, without allocation
+                if a=a1 then
+                  inc(a1); // enable optimistic O(1) search for in-order input
+                break;
+              end;
+          until (Par=nil) or (EndOfObject='}');
+        end;
         Par := nil;
       end;
-      else exit; // only support JSON array or JSON object as input
+      else if PInteger(Par)^=NULL_LOW then
+        Par := nil else
+        exit; // only support JSON array or JSON object as input
       end;
     end;
     // decode input parameters (if any) in f*[]
@@ -58719,7 +59536,9 @@ begin
             if optErrorOnMissingParam in Options then
               exit else     
               continue else // ignore and leave void value by default
-            Par := ParObjValues[a]; // value is to be retrieved from JSON object
+            Par := ParObjValues[a] else // value to be retrieved from JSON object
+          if Par=nil then
+            break; // premature end of ..] (ParObjValuesUsed=false)
         case ValueType of
         smvObject: begin
           Par := JSONToObject(fObjects[IndexVar],Par,valid,nil,JSONTOOBJECT_TOLERANTOPTIONS);
@@ -58748,7 +59567,7 @@ begin
         smvBoolean..smvWideString: begin
           Val := GetJSONField(Par,Par,@wasString,@EndOfObject,@ValLen);
           if (Val=nil) and (Par=nil) and (EndOfObject<>'}') then
-            exit;  // 'null' will set Val=nil and Par<>nil
+            exit;  // 'null': Val=nil and Par<>nil
           if (Val<>nil) and (wasString and not (vIsString in ValueKindAsm)) then
             exit;
           case ValueType of
@@ -59404,6 +60223,8 @@ begin
   if not aRest.InheritsFrom(TSQLRestClientURI) then
     EServiceException.CreateUTF8('%.Create(): % interface needs a Client connection',
       [self,aInterface^.Name]);
+  if fClient=nil then
+    fClient := TSQLRestClientURI(aRest);
   inherited Create(aRest,aInterface,aInstanceCreation,aContractExpected);
   // initialize a shared instance (if needed)
   if fInstanceCreation in [sicShared,sicPerSession,sicPerUser,sicPerGroup,sicPerThread] then begin
@@ -59420,8 +60241,10 @@ begin
     if ('['+ContractExpected+']'<>RemoteContract) and
        ('{"contract":'+ContractExpected+'}'<>RemoteContract) then
       raise EServiceException.CreateUTF8('%.Create(): server''s I% contract '+
-        'differs from client''s: expected [%], received %',
-        [self,fInterfaceURI,ContractExpected,RemoteContract]);
+        'differs from client''s: expected [%], received % - you may need to '+
+        'upgrade your % client to match % server expectations',
+        [self,fInterfaceURI,ContractExpected,RemoteContract,
+         ExeVersion.Version.DetailedOrVoid,fClient.fSessionVersion]);
   end;
 end;
 
@@ -59674,7 +60497,7 @@ begin
 end;
 
 function EnterWeakZeroClass(aObject: TObject; CreateIfNonExisting: boolean): TSetWeakZeroClass;
- {$ifdef HASINLINE}inline;{$endif}
+ {$ifdef HASINLINENOTX86}inline;{$endif}
 begin
   result := PPointer(PPtrInt(aObject)^+vmtAutoTable)^;
   if (result<>nil) and (TClass(PPointer(result)^)=TSQLRecordProperties) then
@@ -59819,12 +60642,14 @@ procedure InterfaceArrayDeleteAfterException(var aInterfaceArray;
 begin
   try
     {$ifdef WITHLOG}
-    aLog.SynLog.Log(sllWarning,'InterfaceArrayDeleteAfterException %',[aLogMsg],aInstance);
+    aLog.SynLog.Log(sllWarning,'InterfaceArrayDeleteAfterException % (index=%)',
+      [aLogMsg,aItemIndex],aInstance);
     {$endif}
     InterfaceArrayDelete(aInterfaceArray,aItemIndex);
   except
     on E: Exception do
-      aLog.SynLog.Log(sllDebug,'Callback unstability at deletion: %',[E],aInstance);
+      aLog.SynLog.Log(sllDebug,'Callback % unstability at deletion: %',
+        [aLogMsg,E],aInstance);
   end;
 end;
 
@@ -59850,6 +60675,8 @@ initialization
   {$endif}
   SetThreadNameDefault({$ifdef BSD}Cardinal{$endif}(GetCurrentThreadID),'Main Thread');
   SetThreadNameInternal := SetThreadNameWithLog;
+  GarbageCollectorFreeAndNil(JSONCustomParsers,TSynDictionary.Create(
+    TypeInfo(TClassDynArray),TypeInfo(TJSONCustomParsers)));
   TTextWriter.SetDefaultJSONClass(TJSONSerializer);
   TJSONSerializer.RegisterObjArrayForJSON(
     [TypeInfo(TSQLModelRecordPropertiesObjArray),TSQLModelRecordProperties]);

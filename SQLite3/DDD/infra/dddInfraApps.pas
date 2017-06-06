@@ -72,6 +72,7 @@ uses
   Variants,
   SynCommons,
   SynLog,
+  SynCrypto,
   SynEcc,
   mORMot,
   mORMotDDD,
@@ -100,7 +101,7 @@ type
     /// this abstract method should be overriden to return a new service/daemon
     // instance, using the (inherited) fSettings as parameters
     function NewDaemon: TDDDAdministratedDaemon; virtual;
-    /// returns some text to be supplied to the console for /help
+    /// returns some text to be supplied to the console for /help - '' by default
     function CustomHelp: string; virtual;
     {$ifdef MSWINDOWS} // to support Windows Services
     procedure DoStart(Sender: TService);
@@ -211,6 +212,9 @@ type
     // finalize HTTP Server and SOA log database
     procedure InternalStop; override;
   public
+    /// generate API documentation corresponding to REST SOA interfaces
+    procedure WrapperGenerate(const DestFile: TFileName;
+      const Template: TFileName = 'API.adoc.mustache');
     /// reference to the main HTTP server publishing this daemon Services
     // - may be nil outside a Start..Stop range
     property HttpServer: TSQLHttpServer read fHttpServer;
@@ -344,6 +348,9 @@ type
     // - returns false on any error, true on success
     // - call e.g. TCrtSocket.TrySndLow() method
     function DataOut(Content: PAnsiChar; ContentLength: integer): boolean;
+    /// returns the low-level handle of this connection
+    // - is e.g. the socket file description
+    function Handle: integer;
   end;
 
   /// implements IDDDSocket using a SynCrtSock.TCrtSocket instance
@@ -375,6 +382,8 @@ type
     function DataIn(Content: PAnsiChar; ContentLength: integer): integer;
     /// call TCrtSocket.TrySndLow() method
     function DataOut(Content: PAnsiChar; ContentLength: integer): boolean;
+    /// returns TCrtsocket.Sock
+    function Handle: integer;
     /// read-only access to the associated processing thread
     // - not published, to avoid stack overflow since TDDDSocketThreadMonitoring
     // would point to this instance
@@ -482,6 +491,8 @@ type
     // - returns false on any error, true on success
     // - then MockDataOut could be used to retrieve the sent data
     function DataOut(Content: PAnsiChar; ContentLength: integer): boolean;
+    /// returns 0 (no associated file descriptor)
+    function Handle: integer;
     /// read-only access to the associated processing thread
     // - not published, to avoid stack overflow since TDDDSocketThreadMonitoring
     // would point to this instance
@@ -595,6 +606,57 @@ function ToText(st: TDDDSocketThreadState): PShortString; overload;
 function ToText(exc: TDDDMockedSocketException): PShortString; overload;
 
 
+{ ----- Applications Securization }
+
+type
+  /// result codes of the ECCAuthorize() function
+  TECCAuthorize = (eaSuccess, eaInvalidSecret, eaMissingUnlockFile, 
+    eaInvalidUnlockFile, eaInvalidJson);
+
+/// any sensitive, or licensed program, could call this method to check for
+// authorized execution for a given user on a given computer, using very secure
+// asymmetric ECC cryptography
+// - applock.public/.private keys pair should have been generated, applock.public
+// stored as aAppLockPublic64 in the executables, and applock.private kept secret
+// - will search for encrypted authorization in a local user@host.unlock file
+// - if no user@host.unlock file is found, will create local user@host.public
+// and user@host.secret files and return eaMissingUnlockFile: user should then send
+// user@host.public to the product support to receive its user@host.unlock file
+// (a dedicated UI may be developped, or an uncrypted email can be used for
+// transfer with the support team, thanks to asymmetric cryptography)
+// - local user@host.secret file is encrypted via DPAPI/CryptDataForCurrentUser
+// for the specific computer and user (to avoid .unlock reuse on another PC)
+// - support team should create a user@host.json file matching aContent: TObject
+// published properties, containing all application-specific settings and
+// authorization scope; then it could create the unlock file using e.g. an
+// unlock.bat file running the ECC tool over secret applock.private keys:
+// $ @echo off
+// $ echo Usage:  unlock user@host
+// $ echo.
+// $ ecc sign -file %1.json -auth applock -pass applockprivatepassword -rounds 60000
+// $ ecc crypt -file %1.json -out %1.unlock -auth %1 -saltpass decryptsalt -saltrounds 10000
+// $ del %1.json.sign
+// - returns eaInvalidUnlockFile if the local user@host.unlock file is not
+// correctly signed and encrypted for this user (e.g. corrupted or deprecated)
+// - eaInvalidJson will indicate some error in the .json created by support team,
+// i.e. if it does not match aContent: TObject published properties
+// - eaSuccess should let the application execute, on the returned scope
+// - returns eaSuccess if a local user@host.unlock file has been successfully
+// decrypted and validated (using ECDSA over aAppLockPublic64) and successfully
+// unserialized from JSON into aContent object instance
+// - user@host.* files are searched in the executable folder if aSearchFolder='',
+// but you may specify a custom location, e.g. use ECCKeyFileFolder
+// - will use the supplied parameters to restrict this authorization to
+// a specific product, using dedicated applock.public/.private keys pair
+// - aSecretInfo^ could be set to retrieve the user@host.secret information
+// (e.g. validity dates), and aLocalFile^ the'<fullpath>user@host' file prefix 
+function ECCAuthorize(aContent: TObject; aSecretDays: integer; const aSecretPass,
+  aDPAPI, aDecryptSalt, aAppLockPublic64: RawUTF8; const aSearchFolder: TFileName = '';
+  aSecretInfo: PECCCertificateSigned = nil; aLocalFile: PFileName = nil): TECCAuthorize;
+
+function ToText(auth: TECCAuthorize): PShortString; overload;
+
+
 implementation
 
 { ----- Implements Service/Daemon Applications }
@@ -639,8 +701,11 @@ var log: ISynLog;
     res: TCQRSResult;
 begin
   {$ifdef WITHLOG}
-  log := SQLite3Log.Enter('DoStart % on %',
-    [fSettings.ServiceName, ExeVersion.Version.VersionInfo],self);
+  SQLite3Log.Add.LogThreadName('Service Start Handler', true);
+  log := SQLite3Log.Enter(self);
+  with ExeVersion do
+    log.Log(sllNewRun, 'Daemon Start svc=% ver=% usr=%',
+      [fSettings.ServiceName, Version.Detailed, LowerCase(User)], self);
   {$endif}
   fDaemon := NewDaemon;
   res := fDaemon.Start;
@@ -651,8 +716,10 @@ end;
 procedure TDDDDaemon.DoStop(Sender: TService);
 begin
   {$ifdef WITHLOG}
-  SQLite3Log.Enter('DoStop % on %',
-    [fSettings.ServiceName, ExeVersion.Version.VersionInfo],self);
+  SQLite3Log.Add.LogThreadName('Service Stop Handler', true);
+  SQLite3Log.Enter(self).
+    Log(sllNewRun, 'Daemon Stop svc=% ver=% usr=%', [fSettings.ServiceName,
+      ExeVersion.Version.Detailed, LowerCase(ExeVersion.User)], self);
   {$endif}
   fDaemon := nil; // will stop the daemon
 end;
@@ -669,7 +736,7 @@ begin
       HttpServerFullWebSocketsLog := true;
       HttpClientFullWebSocketsLog := true;
     end;
-  {$ifdef MSWINDOWS} // Windows 7+ 
+  {$ifdef MSWINDOWS} // Windows 7+
   SetAppUserModelID(fSettings.AppUserModelID);
   {$endif}
   result := nil;
@@ -686,11 +753,12 @@ end;
 
 type
   TExecuteCommandLineCmd = (cNone, cInstall, cUninstall, cStart, cStop, cState,
-    cVersion, cVerbose, cHelp, cConsole, cDaemon);
+    cVersion, cVerbose, cHelp, cHardenPasswords, cPlainPasswords, cConsole, cDaemon);
 
 procedure TDDDDaemon.ExecuteCommandLine(ForceRun: boolean);
 var
   name, param: RawUTF8;
+  passwords: RawByteString;
   cmd: TExecuteCommandLineCmd;
   daemon: TDDDAdministratedDaemon;
   {$ifdef MSWINDOWS}
@@ -704,6 +772,70 @@ var
   function cmdText: RawUTF8;
   begin
     result := GetEnumNameTrimed(TypeInfo(TExecuteCommandLineCmd), cmd);
+  end;
+
+  procedure HardenSettings(const folder: TFileName; P: PUTF8Char);
+  var B: PUTF8Char;
+      fn, bak: TFileName;
+      pass, appsec, plain, new: RawUTF8;
+      doc: TDocVariantData;
+      modified, any: boolean;
+      v: PVariant;
+  begin
+    TextColor(ccLightCyan);
+    writeln('Executing /', cmdText, ' with User "', ExeVersion.User, '"'#13#10);
+    any := false;
+    repeat
+      B := pointer(GetNextLine(P,P));
+      if B=nil then
+        exit;
+      fn := format('%s%s.settings', [folder, GetNextItem(B, '=')]);
+      doc.InitJSONFromFile(fn, JSON_OPTIONS_FAST, true);
+      modified := false;
+      if doc.Count > 0 then
+        while B <> nil do begin
+          appsec := GetNextItem(B, '@');
+          v := doc.GetPVariantByPath(GetNextItem(B));
+          if v = nil then
+            continue;
+          if VariantToUTF8(v^, pass) and (pass <> '') then begin
+            plain := TSynPersistentWithPassword.ComputePlainPassword(pass, 0, appsec);
+            if plain = '' then
+              continue; // may occur with unexpected user
+            case cmd of
+            cHardenPasswords:
+              new := FormatUTF8('%:%', [ExeVersion.User,
+                BinToBase64(CryptDataForCurrentUser(plain, appsec, true))]);
+            cPlainPasswords:
+              new := TSynPersistentWithPassword.ComputePassword(plain);
+            else
+              exit;
+            end;
+            FillZero(RawByteString(plain));
+            if new <> pass then begin
+              RawUTF8ToVariant(new, v^); // replace
+              modified := true;
+            end;
+          end;
+        end;
+      if modified then begin
+        bak := ChangeFileExt(fn, '.bak');
+        DeleteFile(bak);
+        RenameFile(fn, bak);
+        FileFromString(doc.ToJSON('', '', jsonHumanReadable), fn);
+        any := true;
+        TextColor(ccLightCyan);
+      end
+      else
+        TextColor(ccDarkGray);
+      writeln('  ', fn);
+      doc.Clear;
+    until P=nil;
+    if any and (cmd = cHardenPasswords) then begin
+      TextColor(ccYellow);
+      writeln(#13#10' Warning:'#13#10' /', cmdText,
+        ' new .settings will work only with user "', ExeVersion.User, '"');
+    end;
   end;
 
   procedure Show(Success: Boolean);
@@ -730,14 +862,18 @@ var
   end;
 
   procedure Syntax;
+  var spaces: string;
   begin
     writeln('Try with one of the switches:');
     writeln({$ifdef MSWINDOWS}' '{$else}' ./'{$endif}, ExeVersion.ProgramName,
       ' /console -c /verbose /daemon -d /help -h /version');
+    spaces := StringOfChar(' ', length(ExeVersion.ProgramName) + 2);
     {$ifdef MSWINDOWS}
-    writeln(ExeVersion.ProgramName, ' /install /uninstall /start /stop /state');
+    writeln(spaces, '/install /uninstall /start /stop /state');
     {$endif}
-    writeln(CustomHelp);
+    if passwords <> '' then
+      writeln(spaces, '/hardenpasswords /plainpasswords');
+    writeln(spaces, CustomHelp);
   end;
 
 begin
@@ -746,6 +882,7 @@ begin
       fDaemon := NewDaemon; // should initialize the default .settings
       fDaemon := nil;
     end;
+    ResourceSynLZToRawByteString('passwords', passwords);
     TextColor(ccLightGreen);
     name := StringToUTF8(fSettings.ServiceDisplayName);
     if name = '' then // perhaps the settings file is still void
@@ -772,11 +909,10 @@ begin
           cmd := cConsole;
         'd', 'D':
           cmd := cDaemon;
-        'h', 'H':
-          cmd := cHelp;
       else
         byte(cmd) := 1 + IdemPCharArray(@param[2],
-          ['INST', 'UNINST', 'START', 'STOP', 'STAT', 'VERS', 'VERB']);
+          ['INST', 'UNINST', 'START', 'STOP', 'STAT', 'VERS', 'VERB', 'HELP',
+           'HARDEN', 'PLAIN']);
       end;
     case cmd of
       cHelp:
@@ -818,6 +954,14 @@ begin
             fDaemon := nil; // will stop the daemon
           end;
         end;
+      cHardenPasswords, cPlainPasswords:
+        if passwords <> ''  then
+          HardenSettings(IncludeTrailingPathDelimiter(fSettings.SettingsFolder),
+            pointer(passwords))
+        else begin
+          TextColor(ccLightRed);
+          writeln('No "passwords" resource bound to ', ExeVersion.ProgramFullSpec);
+        end;
     else
     {$ifdef MSWINDOWS} // implement the daemon as a Windows Service
       with fSettings do
@@ -826,7 +970,7 @@ begin
             Syntax
           else begin
             TextColor(ccLightRed);
-            writeln('No ServiceName specified - please fix the setttings');
+            writeln('No ServiceName specified - please fix the settings');
           end
         else
           case cmd of
@@ -1003,6 +1147,12 @@ end;
 
 
 { ----- Implements Thread Processing to access a TCP server }
+
+procedure TDDDRestHttpDaemon.WrapperGenerate(const DestFile, Template: TFileName);
+begin
+  Settings.Rest.WrapperGenerate(Rest, GetInteger(pointer(HttpServer.Port)), DestFile, Template);
+end;
+
 
 { TDDDSocketThreadMonitoring }
 
@@ -1250,9 +1400,10 @@ begin
     fSocketDisable := true;
     fRest.LogClass.Add.Log(sllDebug, 'Shutdown: % will stop any communication ' +
       'with %:%', [ClassType, fHost, fPort], self);
-    if andTerminate then begin
+    if andTerminate and not Terminated then begin
       sleep(100);
       Terminate;
+      WaitFor;
     end;
   end;
 end;
@@ -1374,6 +1525,11 @@ begin
   if fSocket.LastLowSocketError=0 then
     result := '' else
     StringToUTF8(SocketErrorMessage(fSocket.LastLowSocketError),result);
+end;
+
+function TDDDSynCrtSocket.Handle: integer;
+begin
+  result := fSocket.Sock;
 end;
 
 
@@ -1583,6 +1739,10 @@ begin
   fSafe.UnLock;
 end;
 
+function TDDDMockedSocket.Handle: integer;
+begin
+  result := 0;
+end;
 
 
 { ----- Implements ORM/SOA REST Client access }
@@ -1860,12 +2020,110 @@ begin
         result.AdministrationServer, AuthHttp);
 end;
 
+
+{ ----- Applications Securization }
+
+function ToText(auth: TECCAuthorize): PShortString;
+begin
+  result := GetEnumName(TypeInfo(TECCAuthorize), ord(auth));
+end;
+
+function ECCAuthorize(aContent: TObject; aSecretDays: integer; const aSecretPass,
+ aDPAPI, aDecryptSalt, aAppLockPublic64: RawUTF8; const aSearchFolder: TFileName;
+  aSecretInfo: PECCCertificateSigned; aLocalFile: PFileName): TECCAuthorize;
+var
+  fileroot, fileunlock, filesecret, filepublic: TFileName;
+  priv, new: TECCCertificateSecret;
+  auth: TECCCertificate;
+  signature: TECCSignatureCertifiedContent;
+  unlock, secret, temp, json: RawByteString;
+  decrypt: TECCDecrypt;
+  hash: THash256;
+  valid: TECCValidity;
+  issuer: TECCCertificateIssuer;
+  privok, jsonok: boolean;
+begin
+  with ExeVersion do
+    fileroot := SysUtils.LowerCase(format('%s@%s', [User, Host]));
+  if aSearchFolder = '' then
+    fileroot := ExeVersion.ProgramFilePath + fileroot else
+    fileroot := IncludeTrailingPathDelimiter(aSearchFolder) + fileroot;
+  if aLocalFile <> nil then
+    aLocalFile^ := fileroot;
+  fileunlock := fileroot + '.unlock';
+  filepublic := fileroot + ECCCERTIFICATEPUBLIC_FILEEXT;
+  filesecret := fileroot + '.secret'; // DPAPI-encrypted .private file
+  try
+    unlock := StringFromFile(fileunlock);
+    secret := StringFromFile(filesecret);
+    temp := CryptDataForCurrentUser(secret, aDPAPI, false);
+    priv := TECCCertificateSecret.Create;
+    try
+      result := eaInvalidSecret;      
+      {$ifdef ENHANCEDRTL} {$ifdef VER150}
+      if crc32c($D26BE33F,@ECCAuthorize,14)<>$29743A4B then
+        exit; // avoid stubbing (Delphi 7 ERTL only - just to show how it works)
+      {$endif} {$endif}
+      ECCIssuer(ExeVersion.User,Issuer);
+      privok := priv.LoadFromSecureBinary(temp, aSecretPass, 100) and
+        IsEqual(priv.Content.Signed.Issuer, Issuer);
+      if aSecretInfo <> nil then
+        aSecretInfo^ := priv.Content.Signed;
+      if not privok or not ECCCheckDate(priv.Content) then begin
+        new := TECCCertificateSecret.CreateNew(nil, ExeVersion.User, aSecretDays);
+        try
+          new.ToFile(filepublic);
+          temp := new.SaveToSecureBinary(aSecretPass, 7, 100);
+          secret := CryptDataForCurrentUser(temp, aDPAPI, true);
+          FileFromString(secret, filesecret);
+        finally
+          new.Free;
+        end;
+        exit;
+      end;
+      result := eaMissingUnlockFile;
+      if unlock = '' then
+        exit;
+      result := eaInvalidUnlockFile;
+      decrypt := priv.Decrypt(unlock, json, @signature, nil, nil, aDecryptSalt, 10000);
+      if decrypt <> ecdDecryptedWithSignature then
+        exit;
+      auth := TECCCertificate.CreateFromBase64(aAppLockPublic64);
+      try
+        hash := SHA256Digest(pointer(json), length(json));
+        valid := ECCVerify(signature, hash, auth.Content);
+        if not (valid in ECC_VALIDSIGN) then
+          exit;
+      finally
+        auth.Free;
+      end;
+    finally
+      priv.Free;
+    end;
+    RemoveCommentsFromJSON(pointer(json));
+    JSONToObject(aContent, pointer(json), jsonok, nil, JSONTOOBJECT_TOLERANTOPTIONS);
+    if jsonok then
+      result := eaSuccess
+    else
+      result := eaInvalidJson;
+  finally
+    FillZero(hash);
+    FillZero(json);
+    FillZero(unlock);
+    FillZero(temp);
+    FillZero(secret);
+  end;
+end;
+
+
 initialization
   TJSONSerializer.RegisterObjArrayForJSON(
     [TypeInfo(TECCCertificateObjArray),TECCCertificate]);
+  {$ifdef DEBUG}
   {$ifdef EnableMemoryLeakReporting}
   {$ifdef HASFASTMM4} // FastMM4 integrated in Delphi 2006 (and up)
   ReportMemoryLeaksOnShutdown := True;
+  {$endif}
   {$endif}
   {$endif}
 end.

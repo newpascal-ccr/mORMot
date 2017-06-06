@@ -1533,6 +1533,9 @@ type
     // fMissingBookmarks list, and will be linked at CreateBookMark method call
     function CreateLink(const ARect: TPdfRect; const aBookmarkName: RawUTF8;
       BorderStyle: TPdfAnnotationBorder=abSolid; BorderWidth: integer=1): TPdfDictionary;
+    /// wrapper to create a hyper-link, with a specific URL value
+    function CreateHyperLink(const ARect: TPdfRect; const url: RawUTF8;
+      BorderStyle: TPdfAnnotationBorder=abSolid; BorderWidth: integer=0): TPdfDictionary;
     /// create an Outline entry at a specified position of the current page
     // - the outline tree is created from the specified numerical level (0=root),
     // just after the item added via the previous CreateOutline call
@@ -1876,7 +1879,7 @@ type
     procedure ConcatToCTM(a, b, c, d, e, f: Single; Decimals: Cardinal=6); {  cm  }
 
     /// Set the flatness tolerance in the graphics state
-    // - see Section 6.5.1, “Flatness Tolerance” of the PDF 1.3 reference:
+    // - see Section 6.5.1, "Flatness Tolerance" of the PDF 1.3 reference:
     // The flatness tolerance controls the maximum permitted distance in
     // device pixels between the mathematically correct path and an
     // approximation constructed from straight line segments
@@ -1960,7 +1963,7 @@ type
     // it does nothing
     procedure Closepath;                                         {  h   }
     /// End the path object without filling or stroking it
-    // - This operator is a “path-painting no-op,” used primarily for the
+    // - This operator is a "path-painting no-op", used primarily for the
     // side effect of changing the clipping path
     procedure NewPath;                                           {  n   }
     /// Stroke the path
@@ -2001,7 +2004,7 @@ type
     // the page affected by painting operators. The closed subpaths of this path
     // define the area that can be painted. Marks falling inside this area will
     // be applied to the page; those falling outside it will not. (Precisely what
-    // is considered to be “inside” a path is discussed under “Filling,” above.)
+    // is considered to be inside a path is discussed under "Filling", above.)
     // - The initial clipping path includes the entire page. Both clipping path
     // methods (Clip and EoClip) may appear after the last path construction operator
     // and before the path-painting operator that terminates a path object.
@@ -2026,7 +2029,7 @@ type
     // - word spacing is used by the ShowText and ShowTextNextLine methods
     // - Default value is 0
     procedure SetWordSpace(wordSpace: Single);                   {  Tw  }
-    /// Set the horizontal scaling to (scale ÷ 100)
+    /// Set the horizontal scaling to (scale/100)
     // - hScaling is a number specifying the percentage of the normal width
     // - Default value is 100 (e.g. normal width)
     procedure SetHorizontalScaling(hScaling: Single);              {  Tz  }
@@ -5965,6 +5968,18 @@ begin
     result.AddItem('Dest',aDest.GetValue);
 end;
 
+function TPdfDocument.CreateHyperLink(const ARect: TPdfRect; const url : RawUTF8;
+  BorderStyle: TPdfAnnotationBorder; BorderWidth: integer): TPdfDictionary;
+var aURIObj: TPdfDictionary;
+begin
+  result := CreateAnnotation(asLink,ARect,BorderStyle,BorderWidth);
+  aURIObj := TPdfDictionary.Create(FXref);
+  aURIObj.FSaveAtTheEnd := true;
+  aURIObj.AddItem('S', 'URI');
+  aURIObj.AddItemTextUTF8('URI', url);
+  FXref.AddObject(aURIObj);
+end;
+
 function TPdfDocument.CreateDestination: TPdfDestination;
 begin
   Result := TPdfDestination.Create(Self);
@@ -6480,7 +6495,7 @@ function TPdfDocument.TTFFontPostcriptName(aFontIndex: integer; AStyle: TPdfFont
 // see http://www.microsoft.com/typography/OTSPEC/name.htm
 function TrueTypeFontName(const aFontName: RawUTF8; AStyle: TPdfFontStyles): PDFString;
 var i: Integer;
-begin // from PDF 1.3 § 5.5.2
+begin // from PDF 1.3 #5.5.2
   SetString(result,PAnsiChar(pointer(aFontName)),length(aFontName));
   for i := length(result) downto 1 do
     if (Result[i]<=' ') or (Result[i]>=#127) then
@@ -8089,7 +8104,7 @@ end;
 
 const
   { collection of flags defining various characteristics of the font
-    see PDF Reference 1.3 §5.7.1 }
+    see PDF Reference 1.3 #5.7.1 }
   PDF_FONT_FIXED_WIDTH = 1;
   PDF_FONT_SERIF       = 2;
   PDF_FONT_SYMBOLIC    = 4;
@@ -8324,7 +8339,7 @@ begin
   WR := TPdfWrite.Create(fDoc,DS);
   try
     if Unicode then begin
-      // 1. Unicode Font (see PDF 1.3 reference §5.9)
+      // 1. Unicode Font (see PDF 1.3 reference #5.9)
       // create descendant font
       Descendant := TPdfDictionary.Create(fDoc.FXref);
       Descendant.AddItem('Type','Font');
@@ -9222,10 +9237,10 @@ const
   STOCKPENCOLOR: array[WHITE_PEN..BLACK_PEN] of cardinal = (
     clWhite, clBlack);
 
-function CenterPoint(const Rect: TRect): TPoint;
+function CenterPoint(const Rect: TRect): TPoint; {$ifdef HASINLINE}inline;{$endif}
 begin
-  result.X := (Rect.Right-Rect.Left) div 2+Rect.Left;
-  result.Y := (Rect.Bottom-Rect.Top) div 2+Rect.Top;
+  result.X := (Rect.Right+Rect.Left) div 2;
+  result.Y := (Rect.Bottom+Rect.Top) div 2;
 end;
 
 /// EMF enumeration callback function, called from GDI
@@ -9285,24 +9300,29 @@ begin
   EMR_SETWORLDTRANSFORM:
     E.ScaleMatrix(@PEMRSetWorldTransform(R)^.xform, MWT_SET);
   EMR_CREATEPEN:
-    with PEMRCreatePen(R)^, E.obj[ihPen-1] do begin
-      kind := OBJ_PEN;
-      PenColor := lopn.lopnColor;
-      PenWidth := lopn.lopnWidth.X;
-      PenStyle := lopn.lopnStyle;
-    end;
+    with PEMRCreatePen(R)^ do
+    if ihPen-1<cardinal(length(E.Obj)) then
+      with E.obj[ihPen-1] do begin
+        kind := OBJ_PEN;
+        PenColor := lopn.lopnColor;
+        PenWidth := lopn.lopnWidth.X;
+        PenStyle := lopn.lopnStyle;
+      end;
   EMR_CREATEBRUSHINDIRECT:
-    with PEMRCreateBrushIndirect(R)^, E.obj[ihBrush-1] do begin
-      kind := OBJ_BRUSH;
-      BrushColor := lb.lbColor;
-      BrushNull := (lb.lbStyle=BS_NULL);
-      BrushStyle := lb.lbStyle;
-    end;
+    with PEMRCreateBrushIndirect(R)^ do
+    if ihBrush-1<cardinal(length(E.Obj)) then
+      with E.obj[ihBrush-1] do begin
+        kind := OBJ_BRUSH;
+        BrushColor := lb.lbColor;
+        BrushNull := (lb.lbStyle=BS_NULL);
+        BrushStyle := lb.lbStyle;
+      end;
   EMR_EXTCREATEFONTINDIRECTW:
     E.CreateFont(PEMRExtCreateFontIndirect(R));
   EMR_DELETEOBJECT:
-    if PEMRDeleteObject(R)^.ihObject-1<cardinal(length(E.Obj)) then // avoid GPF
-      E.obj[PEMRDeleteObject(R)^.ihObject-1].kind := 0;
+    with PEMRDeleteObject(R)^ do
+      if ihObject-1<cardinal(length(E.Obj)) then // avoid GPF
+        E.obj[ihObject-1].kind := 0;
   EMR_SELECTOBJECT:
     E.SelectObjectFromIndex(PEMRSelectObject(R)^.ihObject);
   EMR_MOVETOEX: begin
@@ -9411,14 +9431,21 @@ begin
       E.Canvas.MoveToI(PEMRPolyLine(R)^.aptl[0].X,PEMRPolyLine(R)^.aptl[0].Y);
       for i := 1 to PEMRPolyLine(R)^.cptl-1 do
         E.Canvas.LineToI(PEMRPolyLine(R)^.aptl[i].X,PEMRPolyLine(R)^.aptl[i].Y);
-      Position := PEMRPolyLine(R)^.aptl[PEMRPolyLine(R)^.cptl-1];
+      if PEMRPolyLine(R)^.cptl>0 then
+        Position := PEMRPolyLine(R)^.aptl[PEMRPolyLine(R)^.cptl-1] else
+        Position := PEMRPolyLine(R)^.aptl[0];
     end else begin
       E.Canvas.MoveToI(PEMRPolyLine16(R)^.apts[0].X,PEMRPolyLine16(R)^.apts[0].Y);
-      for i := 1 to PEMRPolyLine16(R)^.cpts-1 do
-        E.Canvas.LineToI(PEMRPolyLine16(R)^.apts[i].X,PEMRPolyLine16(R)^.apts[i].Y);
-      with PEMRPolyLine16(R)^.apts[PEMRPolyLine16(R)^.cpts-1] do begin
-        Position.X := X;
-        Position.Y := Y;
+      if PEMRPolyLine16(R)^.cpts>0 then begin
+        for i := 1 to PEMRPolyLine16(R)^.cpts-1 do
+          E.Canvas.LineToI(PEMRPolyLine16(R)^.apts[i].X,PEMRPolyLine16(R)^.apts[i].Y);
+        with PEMRPolyLine16(R)^.apts[PEMRPolyLine16(R)^.cpts-1] do begin
+          Position.X := X;
+          Position.Y := Y;
+        end;
+      end else begin
+        Position.X := PEMRPolyLine16(R)^.apts[0].X;
+        Position.Y := PEMRPolyLine16(R)^.apts[0].Y;
       end;
     end;
     Moved := false;
@@ -9440,7 +9467,9 @@ begin
       E.Canvas.CurveToCI(PEMRPolyBezier(R)^.aptl[i*3+1].X,PEMRPolyBezier(R)^.aptl[i*3+1].Y,
         PEMRPolyBezier(R)^.aptl[i*3+2].X,PEMRPolyBezier(R)^.aptl[i*3+2].Y,
         PEMRPolyBezier(R)^.aptl[i*3+3].X,PEMRPolyBezier(R)^.aptl[i*3+3].Y);
-    Position := PEMRPolyBezier(R)^.aptl[PEMRPolyBezier(R)^.cptl-1];
+    if PEMRPolyBezier(R)^.cptl>0 then
+      Position := PEMRPolyBezier(R)^.aptl[PEMRPolyBezier(R)^.cptl-1] else
+      Position := PEMRPolyBezier(R)^.aptl[0];
     Moved := false;
     if not E.Canvas.FNewPath then
       if not pen.null then
@@ -9451,13 +9480,18 @@ begin
     if not pen.null then
       E.NeedPen;
     E.Canvas.MoveToI(PEMRPolyBezier16(R)^.apts[0].X,PEMRPolyBezier16(R)^.apts[0].Y);
-    for i := 0 to (PEMRPolyBezier16(R)^.cpts div 3)-1 do
-      E.Canvas.CurveToCI(PEMRPolyBezier16(R)^.apts[i*3+1].X,PEMRPolyBezier16(R)^.apts[i*3+1].Y,
-        PEMRPolyBezier16(R)^.apts[i*3+2].X,PEMRPolyBezier16(R)^.apts[i*3+2].Y,
-        PEMRPolyBezier16(R)^.apts[i*3+3].X,PEMRPolyBezier16(R)^.apts[i*3+3].Y);
-    with PEMRPolyBezier16(R)^.apts[PEMRPolyBezier16(R)^.cpts-1] do begin
-      Position.X := X;
-      Position.Y := Y;
+    if PEMRPolyBezier16(R)^.cpts>0 then begin
+      for i := 0 to (PEMRPolyBezier16(R)^.cpts div 3)-1 do
+        E.Canvas.CurveToCI(PEMRPolyBezier16(R)^.apts[i*3+1].X,PEMRPolyBezier16(R)^.apts[i*3+1].Y,
+          PEMRPolyBezier16(R)^.apts[i*3+2].X,PEMRPolyBezier16(R)^.apts[i*3+2].Y,
+          PEMRPolyBezier16(R)^.apts[i*3+3].X,PEMRPolyBezier16(R)^.apts[i*3+3].Y);
+      with PEMRPolyBezier16(R)^.apts[PEMRPolyBezier16(R)^.cpts-1] do begin
+        Position.X := X;
+        Position.Y := Y;
+      end;
+    end else begin
+      Position.X := PEMRPolyBezier16(R)^.apts[0].X;
+      Position.Y := PEMRPolyBezier16(R)^.apts[0].Y;
     end;
     Moved := false;
     if not E.Canvas.FNewPath then
@@ -9471,11 +9505,13 @@ begin
     if not E.Canvas.FNewPath then
       if not Moved then
         E.Canvas.MoveToI(Position.X,Position.Y);
-    for i := 0 to (PEMRPolyBezierTo(R)^.cptl div 3)-1 do
-      E.Canvas.CurveToCI(PEMRPolyBezierTo(R)^.aptl[i*3].X,PEMRPolyBezierTo(R)^.aptl[i*3].Y,
-        PEMRPolyBezierTo(R)^.aptl[i*3+1].X,PEMRPolyBezierTo(R)^.aptl[i*3+1].Y,
-        PEMRPolyBezierTo(R)^.aptl[i*3+2].X,PEMRPolyBezierTo(R)^.aptl[i*3+2].Y);
-    Position := PEMRPolyBezierTo(R)^.aptl[PEMRPolyBezierTo(R)^.cptl-1];
+    if PEMRPolyBezierTo(R)^.cptl>0 then begin
+      for i := 0 to (PEMRPolyBezierTo(R)^.cptl div 3)-1 do
+        E.Canvas.CurveToCI(PEMRPolyBezierTo(R)^.aptl[i*3].X,PEMRPolyBezierTo(R)^.aptl[i*3].Y,
+          PEMRPolyBezierTo(R)^.aptl[i*3+1].X,PEMRPolyBezierTo(R)^.aptl[i*3+1].Y,
+          PEMRPolyBezierTo(R)^.aptl[i*3+2].X,PEMRPolyBezierTo(R)^.aptl[i*3+2].Y);
+      Position := PEMRPolyBezierTo(R)^.aptl[PEMRPolyBezierTo(R)^.cptl-1];
+    end;
     Moved := false;
     if not E.Canvas.FNewPath then
       if not pen.null then
@@ -9488,13 +9524,15 @@ begin
     if not E.Canvas.FNewPath then
       if not Moved then
         E.Canvas.MoveToI(Position.X,Position.Y);
-    for i := 0 to (PEMRPolyBezierTo16(R)^.cpts div 3)-1 do
-      E.Canvas.CurveToCI(PEMRPolyBezierTo16(R)^.apts[i*3].X,PEMRPolyBezierTo16(R)^.apts[i*3].Y,
-        PEMRPolyBezierTo16(R)^.apts[i*3+1].X,PEMRPolyBezierTo16(R)^.apts[i*3+1].Y,
-        PEMRPolyBezierTo16(R)^.apts[i*3+2].X,PEMRPolyBezierTo16(R)^.apts[i*3+2].Y);
-    with PEMRPolyBezierTo16(R)^.apts[PEMRPolyBezierTo16(R)^.cpts-1] do begin
-      Position.X := X;
-      Position.Y := Y;
+    if PEMRPolyBezierTo16(R)^.cpts>0 then begin
+      for i := 0 to (PEMRPolyBezierTo16(R)^.cpts div 3)-1 do
+        E.Canvas.CurveToCI(PEMRPolyBezierTo16(R)^.apts[i*3].X,PEMRPolyBezierTo16(R)^.apts[i*3].Y,
+          PEMRPolyBezierTo16(R)^.apts[i*3+1].X,PEMRPolyBezierTo16(R)^.apts[i*3+1].Y,
+          PEMRPolyBezierTo16(R)^.apts[i*3+2].X,PEMRPolyBezierTo16(R)^.apts[i*3+2].Y);
+      with PEMRPolyBezierTo16(R)^.apts[PEMRPolyBezierTo16(R)^.cpts-1] do begin
+        Position.X := X;
+        Position.Y := Y;
+      end;
     end;
     Moved := false;
     if not E.Canvas.FNewPath then
@@ -9511,10 +9549,13 @@ begin
         E.Canvas.MoveToI(Position.X,Position.Y);
     end;
     if R^.iType=EMR_POLYLINETO then begin
-      for i := 0 to PEMRPolyLineTo(R)^.cptl-1 do
-        E.Canvas.LineToI(PEMRPolyLineTo(R)^.aptl[i].X,PEMRPolyLineTo(R)^.aptl[i].Y);
-      Position := PEMRPolyLineTo(R)^.aptl[PEMRPolyLineTo(R)^.cptl-1];
-    end else begin // EMR_POLYLINETO16
+      if PEMRPolyLineTo(R)^.cptl>0 then begin
+        for i := 0 to PEMRPolyLineTo(R)^.cptl-1 do
+          E.Canvas.LineToI(PEMRPolyLineTo(R)^.aptl[i].X,PEMRPolyLineTo(R)^.aptl[i].Y);
+        Position := PEMRPolyLineTo(R)^.aptl[PEMRPolyLineTo(R)^.cptl-1];
+      end;
+    end else // EMR_POLYLINETO16
+    if PEMRPolyLineTo16(R)^.cpts>0 then begin
       for i := 0 to PEMRPolyLineTo16(R)^.cpts-1 do
         E.Canvas.LineToI(PEMRPolyLineTo16(R)^.apts[i].X,PEMRPolyLineTo16(R)^.apts[i].Y);
       with PEMRPolyLineTo16(R)^.apts[PEMRPolyLineTo16(R)^.cpts-1] do begin
@@ -9528,7 +9569,8 @@ begin
         E.Canvas.Stroke else
         E.Canvas.NewPath;
   end;
-  EMR_POLYDRAW: begin
+  EMR_POLYDRAW:
+  if PEMRPolyDraw(R)^.cptl>0 then begin
     if not pen.null then
       E.NeedPen;
     polytypes := @PEMRPolyDraw(R)^.aptl[PEMRPolyDraw(R)^.cptl];
@@ -9567,7 +9609,8 @@ begin
         E.Canvas.Stroke else
         E.Canvas.NewPath;
   end;
-  EMR_POLYDRAW16: begin
+  EMR_POLYDRAW16: 
+  if PEMRPolyDraw16(R)^.cpts>0 then begin
     if not pen.null then
       E.NeedPen;
     polytypes := @PEMRPolyDraw16(R)^.apts[PEMRPolyDraw16(R)^.cpts];
@@ -9669,12 +9712,14 @@ begin
     with PEMRModifyWorldTransform(R)^ do
       E.ScaleMatrix(@PEMRModifyWorldTransform(R)^.xform, iMode);
   EMR_EXTCREATEPEN: // approx. - fast solution
-    with PEMRExtCreatePen(R)^, E.obj[ihPen-1] do begin
-      kind := OBJ_PEN;
-      PenColor := elp.elpColor;
-      PenWidth := elp.elpWidth;
-      PenStyle := elp.elpPenStyle and (PS_STYLE_MASK or PS_ENDCAP_MASK);
-    end;
+    with PEMRExtCreatePen(R)^ do
+    if ihPen-1<cardinal(length(E.Obj)) then
+      with E.obj[ihPen-1] do begin
+        kind := OBJ_PEN;
+        PenColor := elp.elpColor;
+        PenWidth := elp.elpWidth;
+        PenStyle := elp.elpPenStyle and (PS_STYLE_MASK or PS_ENDCAP_MASK);
+      end;
   EMR_SETMITERLIMIT:
     if PEMRSetMiterLimit(R)^.eMiterLimit>0.1 then
       E.Canvas.SetMiterLimit(PEMRSetMiterLimit(R)^.eMiterLimit);
@@ -9868,18 +9913,18 @@ begin
   GetTextMetrics(destDC,TM);
   SelectObject(destDC,Old);
   DeleteObject(HF);
-
-  with obj[aLogFont^.ihFont-1] do begin
-    kind := OBJ_FONT;
-    MoveFast(aLogFont^.elfw.elfLogFont,LogFont,sizeof(LogFont));
-    LogFont.lfPitchAndFamily := TM.tmPitchAndFamily;
-    if LogFont.lfOrientation<>0 then
-      FontSpec.angle := LogFont.lfOrientation div 10 else // -360..+360
-      FontSpec.angle := LogFont.lfEscapement div 10;
-    FontSpec.ascent := TM.tmAscent;
-    FontSpec.descent := TM.tmDescent;
-    FontSpec.cell := TM.tmHeight-TM.tmInternalLeading;
-  end;
+  if aLogFont^.ihFont-1<cardinal(length(obj)) then
+    with obj[aLogFont^.ihFont-1] do begin
+      kind := OBJ_FONT;
+      MoveFast(aLogFont^.elfw.elfLogFont,LogFont,sizeof(LogFont));
+      LogFont.lfPitchAndFamily := TM.tmPitchAndFamily;
+      if LogFont.lfOrientation<>0 then
+        FontSpec.angle := LogFont.lfOrientation div 10 else // -360..+360
+        FontSpec.angle := LogFont.lfEscapement div 10;
+      FontSpec.ascent := TM.tmAscent;
+      FontSpec.descent := TM.tmDescent;
+      FontSpec.cell := TM.tmHeight-TM.tmInternalLeading;
+    end;
 end;
 
 procedure TPdfEnum.DrawBitmap(xs, ys, ws, hs, xd, yd, wd, hd, usage: integer;
@@ -10849,7 +10894,7 @@ begin
           for y := 0 to fPixelHeight-1 do
             FWriter.AddRGB(B.ScanLine[y],PInc,fPixelWidth);
           if (PInc=3) and (B.TransparentMode=tmFixed) then begin
-            // [ min1 max1 … minn maxn ]
+            // [ min1 max1 ... minn maxn ]
             TransparentColor := B.TransparentColor;
             FAttributes.AddItem('Mask',TPdfArray.CreateReals(nil,
               [(TransparentColor and $ff), (TransparentColor and $ff),

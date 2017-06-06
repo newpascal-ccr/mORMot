@@ -77,7 +77,7 @@ uses
   {$ifdef KYLIX3}
   LibC,
   {$endif}
-  {$ifdef HASINLINE}
+  {$ifdef HASINLINENOTX86}
   Contnrs,
   {$endif}
   SysUtils,
@@ -597,12 +597,20 @@ begin
           V^.VDate := UnixTimeToDateTime(V^.VInteger); // as MongoDB date/time
           V^.VType := varDate; // direct set to avoid unexpected EInvalidOp
         end;
+        sftUnixMSTime: begin
+          V^.VDate := UnixMSTimeToDateTime(V^.VInteger); // as MongoDB date/time
+          V^.VType := varDate;
+        end;
       end;
       varInt64:
       case info.SQLFieldType of
         sftUnixTime: begin
           V^.VDate := UnixTimeToDateTime(V^.VInt64); // as MongoDB date/time
           V^.VType := varDate; // direct set to avoid unexpected EInvalidOp
+        end;
+        sftUnixMSTime: begin
+          V^.VDate := UnixMSTimeToDateTime(V^.VInt64); // as MongoDB date/time
+          V^.VType := varDate;
         end;
       end;
       varString: // handle some TEXT values
@@ -1330,7 +1338,7 @@ begin // same logic as in TSQLRestStorageInMemory.EngineList()
             MS.Free;
           end;
           if TextOrderByField<>'' then
-            // $orderby is case sensitive with MongoDB -> manual ordering
+            // $orderby is case sensitive with MongoDB -> client-side sort
             with TSQLTableJSON.CreateFromTables(
               [fStoredClass],SQL,pointer(result),length(result)) do
             try

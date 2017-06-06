@@ -296,8 +296,11 @@ type
   // - asDocVariantPerReference will set JSON_OPTIONS[true]/JSON_OPTIONS_FAST
   // settings:
   // ! [dvoValueCopiedByReference,dvoReturnNullForUnknownProperty]
+  // - asDocVariantInternNamesPerValue and asDocVariantInternNamesPerReference
+  // will include dvoInternalNames to the TDocVariant.Options 
   TBSONDocArrayConversion = (
-    asBSONVariant, asDocVariantPerValue, asDocVariantPerReference);
+    asBSONVariant, asDocVariantPerValue, asDocVariantPerReference,
+    asDocVariantInternNamesPerValue, asDocVariantInternNamesPerReference);
 
   /// how TBSONElement.AddMongoJSON() method and AddMongoJSON() and
   // VariantSaveMongoJSON() functions will render their JSON content
@@ -718,6 +721,9 @@ var
   // - if you use this unit, both TDocVariant and TBSONVariant custom types
   // will be registered, since they are needed for any MongoDB / BSON process
   BSONVariantType: TBSONVariant;
+
+/// ready-to-be displayed text of a TBSONElementType value
+function ToText(kind: TBSONElementType): PShortString; overload;
 
 /// create a TBSONVariant custom variant type containing a BSON Object ID
 // - will be filled with some unique values, ready to create a new document key
@@ -2435,16 +2441,23 @@ procedure BSONItemsToDocVariant(Kind: TBSONElementType; BSON: PByte;
   var Doc: TDocVariantData; Option: TBSONDocArrayConversion);
 const OPTIONS: array[TBSONDocArrayConversion] of TDocVariantOptions =
     ([],[dvoReturnNullForUnknownProperty],
-        [dvoReturnNullForUnknownProperty,dvoValueCopiedByReference]);
+        [dvoReturnNullForUnknownProperty,dvoValueCopiedByReference],
+        [dvoReturnNullForUnknownProperty,dvoInternNames],
+        [dvoReturnNullForUnknownProperty,dvoValueCopiedByReference,dvoInternNames]);
 var k: TDocVariantKind;
     i,n,cap: integer;
+    intnames: TRawUTF8Interning;
     items: array[0..63] of TBSONElement;
 begin // very fast optimized code
   if BSON=nil then
     TVarData(Doc).VType := varNull else begin
+    intnames := nil;
     case Kind of
-    betDoc:
+    betDoc: begin
       k := dvObject;
+      if dvoInternNames in Doc.Options then
+        intnames := DocVariantType.InternNames;
+    end;
     betArray:
       k := dvArray;
     else exit; // leave Doc=varEmpty
@@ -2467,7 +2480,9 @@ begin // very fast optimized code
           Doc.Capacity := cap+cap shr 3; // faster for huge arrays
       for i := 0 to n-1 do begin
         if Kind=betDoc then
-          SetString(Doc.Names[i+Doc.Count],PAnsiChar(items[i].Name),items[i].NameLen);
+          if intnames<>nil then
+            intnames.Unique(Doc.Names[i+Doc.Count],items[i].Name,items[i].NameLen) else
+            SetString(Doc.Names[i+Doc.Count],PAnsiChar(items[i].Name),items[i].NameLen);
         items[i].ToVariant(Doc.Values[i+Doc.Count],Option);
       end;
       Doc.SetCount(Doc.Count+n);
@@ -2736,10 +2751,10 @@ begin
       PBoolean(Element)^ := aVarData.VBoolean;
     betInt32:
       if not VariantToInteger(aValue,PInteger(Element)^) then
-        VarCastError;
+        raise EBSONException.Create('TBSONElement.FromVariant(betInt32)');
     betInt64:
       if not VariantToInt64(aValue,PInt64(Element)^) then
-        VarCastError;
+        raise EBSONException.Create('TBSONElement.FromVariant(betInt64)');
     end;
     ElementBytes := BSON_ELEMENTSIZE[Kind];
   end;
@@ -2782,7 +2797,7 @@ str:Kind := betString;
     else         FromBSON(aBson.VBlob);
     end;
     if ElementBytes<0 then
-      VarCastError;
+      raise EBSONException.CreateUTF8('TBSONElement.FromVariant(bson,%)',[ToText(Kind)^]);
   end else
   if aVarData.VType=DocVariantType.VarType then begin
     with TBSONWriter.Create(TRawByteStringStream) do // inlined BSON()   
@@ -2792,15 +2807,16 @@ str:Kind := betString;
     finally
       Free;
     end;
-    case aDoc.Kind of
-    dvObject: Kind := betDoc;
-    dvArray:  Kind := betArray;
-    else VarCastError;
-    end;
+    if dvoIsObject in aDoc.Options then
+      Kind := betDoc else
+    if dvoIsArray in aDoc.Options then
+      Kind := betArray else
+      raise EBSONException.CreateUTF8('TBSONElement.FromVariant(doc,%)',[ToText(aDoc.Kind)^]);
     FromBSON(pointer(aTemp));
     if ElementBytes<0 then
-      VarCastError;
-  end else VarCastError;
+      raise EBSONException.CreateUTF8('TBSONElement.FromVariant(docbson,%)',[ToText(Kind)^]);
+  end else
+    raise EBSONException.CreateUTF8('TBSONElement.FromVariant(VType=%)',[aVarData.VType]);
   end;
 end;
 
@@ -3201,11 +3217,11 @@ end;
 
 procedure TBSONWriter.BSONWrite(const name: RawUTF8; const doc: TDocVariantData);
 begin
-  case doc.Kind of
-  dvObject:    BSONWrite(name,betDoc);
-  dvArray:     BSONWrite(name,betArray);
-  dvUndefined: raise EBSONException.Create('Undefined nested document');
-  end;
+  if dvoIsObject in doc.Options then
+    BSONWrite(name,betDoc) else
+  if dvoIsArray in doc.Options then
+    BSONWrite(name,betArray) else
+    raise EBSONException.Create('Undefined nested document');
   BSONWriteDoc(doc);
 end;
 
@@ -3459,8 +3475,11 @@ begin
   end;
   opContains: begin // http://docs.mongodb.org/manual/reference/operator/query/in
     BSONDocumentBegin(name);
-    BSONWrite(QUERY_OPS[opIn],betArray);
-    BSONWriteArray([Value]);
+    if _Safe(Value)^.Kind=dvArray then
+      BSONWriteVariant(QUERY_OPS[opIn],Value) else begin
+      BSONWrite(QUERY_OPS[opIn],betArray);
+      BSONWriteArray([Value]);
+    end;
     BSONDocumentEnd;
   end;
   else
@@ -4072,6 +4091,11 @@ end;
 
 
 { main BSON* functions }
+
+function ToText(kind: TBSONElementType): PShortString;
+begin
+  result := GetEnumName(TypeInfo(TBSONElementType),ord(kind));
+end;
 
 function ObjectID: variant;
 var ID: TBSONObjectID;
@@ -6104,7 +6128,7 @@ initialization
   Assert(sizeof(TMongoReplyHeader)=36);
   // ensure TDocVariant and TBSONVariant custom types are registered
   if DocVariantType=nil then
-    DocVariantType := SynRegisterCustomVariantType(TDocVariant);
+    DocVariantType := TDocVariant(SynRegisterCustomVariantType(TDocVariant));
   BSONVariantType := SynRegisterCustomVariantType(TBSONVariant) as TBSONVariant;
   InitBSONObjectIDComputeNew;
 

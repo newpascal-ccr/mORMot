@@ -136,7 +136,7 @@ The main approach of this framework is to avoid @*RAD@ in the development of pro
 : Expected Use
 Any application which need moderate database usage (up to some GB of data) with easy setup and administration, together with a secure @*ACID@ behavior in a Client-Server environment should consider using the {\i Synopse mORMot Framework}.
 : Requirement Exceptions
-This framework was developed in order to run mainly under any {\i Delphi} compiler, from version {\i Delphi} 6 to version {\i Delphi 10.1 Berlin}.
+This framework was developed in order to run mainly under any {\i Delphi} compiler, from version {\i Delphi} 6 to version {\i Delphi 10.2 Tokyo}.
 On the {\i server side}, it targets both {\i Win32} and {\i Win64} platforms (using the 64-bit compiler included in latest {\i Delphi} XE2 and up).
 For clients, in addition to those {\i Win32} / {\i Win64} platforms, you have cross-platform code generation abilities, for any {\i Delphi} or {\i @*FreePascal@} target (including {\i @*OSX@} and mobile {\i iOS} or {\i Android}), or AJAX / HTML5 clients via {\i @*Smart Mobile Studio@} - see @90@.
 =[License]
@@ -464,7 +464,7 @@ The {\i Synopse mORMot Framework} shall provide User Interface and Report genera
 Such a ribbon-oriented interface shall be made available, in a per-table approach, and associated reports.
 Here is a sample of screen content, using proprietary TMS components:
 %synfiletms.png
-And here is the same application compiled using only VCL components, available from {\i Delphi} 6 up to {\i Delphi 10.1 Berlin}:
+And here is the same application compiled using only VCL components, available from {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo}:
 %synfilevcl.png
 
 [SRS-DI-2.3.1]
@@ -570,7 +570,7 @@ DisplayName=mORMot Framework Overview
 
 :Synopse mORMot Overview
 %IamLost.png
-{\i Synopse mORMot} is an Open Source @*Client-Server@ @*ORM@ @*SOA@ @*MVC@ framework for {\i Delphi} 6 up to {\i Delphi 10.1 Berlin} and @*FPC@, targeting {\i Win/@*Linux@} for the server, and any platform for clients (including mobile or AJAX).
+{\i Synopse mORMot} is an Open Source @*Client-Server@ @*ORM@ @*SOA@ @*MVC@ framework for {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo} and @*FPC@, targeting {\i Win/@*Linux@} for the server, and any platform for clients (including mobile or AJAX).
 The main features of {\i mORMot} are therefore:
 - {\i ORM/ODM}: objects persistence on almost any database (SQL or NoSQL);
 - {\i SOA}: organize your business logic into @*REST@ services;
@@ -708,7 +708,7 @@ At first, some points can be highlighted, which make this framework distinct to 
 - More than 1800 pages of documentation;
 - {\i Delphi}, {\i FreePascal}, mobile and @*AJAX@ clients can share the same server, and ORM/SOA client access code can be generated on request for any kind of application - see @86@;
 - Full source code provided - so you can enhance it to fulfill any need;
-- Works from {\i Delphi} 6 up to {\i Delphi 10.1 Berlin} and FPC 2.6.4/2.7.1/3.1.1, truly Unicode (uses @*UTF-8@ encoding in its kernel, just like JSON), with any version of {\i Delphi} (no need to upgrade your IDE).
+- Works from {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo} and FPC 2.6.4/2.7.1/3.1.1, truly Unicode (uses @*UTF-8@ encoding in its kernel, just like JSON), with any version of {\i Delphi} (no need to upgrade your IDE).
 \page
 : Benefits
 As you can see from the previous section, {\i mORMot} provides a comprehensive set of features that can help you to manage your crosscutting concerns though a reusable set of components and core functionality.
@@ -1359,7 +1359,7 @@ In the following next paragraphs, we'll comment some main features of the lowest
 - {\f1\fs20 @*TDocVariant@} custom {\f1\fs20 variant} type for dynamic schema-less {\i object} or {\i array} storage.
 Other shared features available in {\f1\fs20 SynTests.pas} and {\f1\fs20 SynLog.pas} will be detailed later, i.e. @*Test@ing and @*Log@ging - see @12@.
 :32 Unicode and UTF-8
-Our {\i mORMot} Framework has 100% UNICODE compatibility, that is compilation under {\i Delphi} 2009 and up (including latest {\i Delphi 10.1 Berlin} revision). The code has been deeply rewritten and @*test@ed, in order to provide compatibility with the {\f1\fs20 String=UnicodeString} paradigm of these compilers.  But the code will also handle safely Unicode for older versions, i.e. from {\i Delphi} 6 up to {\i Delphi} 2007.
+Our {\i mORMot} Framework has 100% UNICODE compatibility, that is compilation under {\i Delphi} 2009 and up (including latest {\i Delphi 10.2 Tokyo} revision). The code has been deeply rewritten and @*test@ed, in order to provide compatibility with the {\f1\fs20 String=UnicodeString} paradigm of these compilers.  But the code will also handle safely Unicode for older versions, i.e. from {\i Delphi} 6 up to {\i Delphi} 2007.
 Since our framework is natively @**UTF-8@ (this is the better character encoding for fast @*JSON@ streaming/parsing in a @*SAX@-like mode, and it is natively supported by the {\i @*SQLite3@} engine), we had to establish a secure way our framework used strings, in order to handle all versions of {\i Delphi} (even pre-Unicode versions, especially the {\i Delphi} 7 version we like so much), and provide compatibility with the {\i @*FreePascal@ Compiler}.
 Some string types have been defined, and used in the code for best cross-compiler efficiency (avoiding most conversion between formats):
 - {\f1\fs20 @**RawUTF8@} is used for every internal data usage, since both {\i SQLite3} and JSON do expect UTF-8 encoding;
@@ -1458,7 +1458,7 @@ Here is how those new methods work:
 !  if GroupA.Find(v)<0 then // fast binary search
 !    ShowMessage('Error: 1500 not found!');
 Some unique methods like {\f1\fs20 Slice, Reverse} or {\f1\fs20 AddArray} are also available, and mimic well-known Python methods.
-Still closer to the generic paradigm, working for {\i Delphi} 6 up to {\i Delphi 10.1 Berlin}, without the need of the slow enhanced RTTI, nor the executable size overhead and compilation issues of generics...
+Still closer to the generic paradigm, working for {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo}, without the need of the slow enhanced RTTI, nor the executable size overhead and compilation issues of generics...
 :  Capacity handling via an external Count
 One common speed issue with the default usage of {\f1\fs20 TDynArray} is that the internal memory buffer is reallocated when you change its length, just like a regular {\i Delphi} {\i dynamic array}.
 That is, whenever you call {\f1\fs20 Add} or {\f1\fs20 Delete} methods, an internal call to {\f1\fs20 SetLength(DynArrayVariable)} is performed. This could be slow, because it always executes some extra code, including a call to {\f1\fs20 ReallocMem}.
@@ -1556,7 +1556,7 @@ Here are the main features of this custom variant type:
 - Perfect storage for dynamic value-objects content, with a {\i schema-less} approach (as you may be used to in scripting languages like {\i Python} or {\i JavaScript});
 - Allow nested documents, with no depth limitation but the available memory;
 - Assignment can be either {\i per-value} (default, safest but slower when containing a lot of nested data), or {\i per-reference} (immediate reference-counted assignment);
-- Very fast JSON serialization / un-serialization with support of {\i MongoDB}-like extended syntax;
+- Very fast JSON serialization / un-serialization with support of {\i MongoDB}-like @*extended syntax@;
 - Access to properties in code, via @*late-binding@ (including almost no speed penalty due to our VCL hack as detailed in @SDD-DI-2.2.3@);
 - Direct access to the internal variant {\i names} and {\i values} arrays from code, by trans-typing into a {\f1\fs20 TDocVariantData record};
 - Instance life-time is managed by the compiler (like any other {\f1\fs20 variant} type), without the need to use {\f1\fs20 interfaces} or explicit {\f1\fs20 try..finally} blocks;
@@ -1569,7 +1569,7 @@ Here are the main features of this custom variant type:
 To create instances of such {\f1\fs20 variant}, you can use some easy-to-remember functions:
 - {\f1\fs20 _Obj() _ObjFast()} global functions to create a {\f1\fs20 variant} {\i object} document;
 - {\f1\fs20 _Arr() _ArrFast()} global functions to create a {\f1\fs20 variant} {\i array} document;
-- {\f1\fs20 _Json() _JsonFast() _JsonFmt() _JsonFastFmt()} global functions to create any {\f1\fs20 variant} {\i object} or {\i array} document from JSON, supplied either with standard or {\i @*MongoDB@}-extended syntax.
+- {\f1\fs20 _Json() _JsonFast() _JsonFmt() _JsonFastFmt()} global functions to create any {\f1\fs20 variant} {\i object} or {\i array} document from JSON, supplied either with standard or {\i @*MongoDB@}-@*extended syntax@.
 You have two non excluding ways of using the {\f1\fs20 TDocVariant} storage:
 - As regular {\f1\fs20 variant} variables, then using either late-binding or faster {\f1\fs20 _Safe()} to access its data;
 - Directly as {\f1\fs20 TDocVariantData} variables, then later on returing a {\f1\fs20 variant} instance using {\f1\fs20 variant(aDocVariantData)}.
@@ -1760,7 +1760,7 @@ With {\f1\fs20 _Json()} or {\f1\fs20 _JsonFmt()}, either a {\i document} or {\i 
 !  writeln(VariantSaveJSON(V3));
 !  // all commands will write '{"name":"john","year":1982}'
 Of course, you can nest objects or arrays as parameters to the {\f1\fs20 _JsonFmt()} function.
-The supplied JSON can be either in strict JSON syntax, or with the {\i @*MongoDB@} extended syntax, i.e. with unquoted property names. It could be pretty convenient and also less error-prone when typing in the {\i Delphi} code to forget about @*quotes@ around the property names of your JSON.
+The supplied JSON can be either in strict JSON syntax, or with the {\i @*MongoDB@} @*extended syntax,@ i.e. with unquoted property names. It could be pretty convenient and also less error-prone when typing in the {\i Delphi} code to forget about @*quotes@ around the property names of your JSON.
 Note that {\i TDocVariant} implements an open interface for adding any custom extensions to JSON: for instance, if the {\f1\fs20 SynMongoDB.pas} unit is defined in your application, you will be able to create any {\i MongoDB} specific types in your JSON, like {\f1\fs20 ObjectID()}, {\f1\fs20 new Date()} or even {\f1\fs20 /regex/option}.
 As a with any {\i object} or {\i array} document, the {\i Delphi} IDE debugger is able to display such {\f1\fs20 variant} values as their JSON representation.
 :   Per-value or per-reference
@@ -1804,7 +1804,7 @@ When working with complex documents, e.g. with @*BSON@ / {\i @*MongoDB@} documen
 :   Number values options
 By default, {\f1\fs20 TDocVariantData} will only recognize {\f1\fs20 integer}, {\f1\fs20 Int64} and {\f1\fs20 currency} - see @33@ - as number values. Any floating point value which may not be translated to/from @*JSON@ textual representation safely will be stored as a JSON string, i.e. if it does match an integer or up to 4 fixed decimals, with 64-bit precision.
 You can set the {\f1\fs20 dvoAllowDoubleValue} option to {\f1\fs20 TDocVariantData}, so that such numbers will be recognized and stored. In this case, only {\f1\fs20 varDouble} storage will be used for the {\f1\fs20 variant} values, i.e. 32-bit IEEE storage, handling 5.0 x 10^-324 .. 1.7 x 10^308 range. With such floating-point values, you may loose precision and digits during the JSON serialization process. This is why it is not enabled by default.
-Also note that some JSON engines do not support 64-bit integer numbers. For instance, {\f1\fs20 @*JavaScript@} engines only store up to 53-bit of information without precision loss, due to their internal storage as a 8 bytes IEEE 754 container. In some cases, it is safest to use JSON string representation of such numbers, as is done with the {\f1\fs20 woIDAsIDstr} value of {\f1\fs20 TTextWriterWriteObjectOption} for safe serialization of {\f1\fs20 TSQLRecord.ID} ORM values.
+Also note that some JSON engines do not support 64-bit integer numbers. For instance, {\f1\fs20 @*JavaScript@} engines only store up to @*53-bit@ of information without precision loss, due to their internal storage as a 8 bytes IEEE 754 container. In some cases, it is safest to use JSON string representation of such numbers, as is done with the {\f1\fs20 woIDAsIDstr} value of {\f1\fs20 TTextWriterWriteObjectOption} for safe serialization of {\f1\fs20 TSQLRecord.ID} ORM values.
 :   Object or array document creation options
 As stated above, a {\f1\fs20 TDocVariantOptions} parameter enables to define the behavior of a {\f1\fs20 TDocVariant} custom type for a given instance. Please refer to the documentation of this set of options to find out the available settings. Some are related to the memory model, other to case-sensitivity of the property names, other to the behavior expected in case of non-existing property, and so on...
 Note that this setting is {\i local} to the given {\f1\fs20 variant} instance.
@@ -2204,7 +2204,7 @@ The following {\f1\fs20 @**published properties@} types are handled by the @*ORM
 |{\f1\fs20 byte}|INTEGER|
 |{\f1\fs20 word}|INTEGER|
 |{\f1\fs20 integer}|INTEGER|
-|{\f1\fs20 cardinal}|N/A|You should use {\f1\fs20 Int64} instead
+|{\f1\fs20 cardinal}|INTEGER|
 |{\f1\fs20 Int64}|INTEGER|
 |{\f1\fs20 boolean}|INTEGER|0 is {\f1\fs20 false}, anything else is {\f1\fs20 true}
 |enumeration|INTEGER|store the ordinal value of the @*enumerated@ item(i.e. starting at 0 for the first element)
@@ -2369,7 +2369,7 @@ It is worth saying that this deletion tracking is not defined at RDBMS level, bu
 :  Variant fields
 The ORM will store {\f1\fs20 variant} fields as TEXT in the database, serialized as JSON.
 At loading, it will check their content:
-- If some custom {\f1\fs20 variant} types are registered (e.g. {\i @*MongoDB@} custom objects), they will be recognized as such (with extended syntax, if applying);
+- If some custom {\f1\fs20 variant} types are registered (e.g. {\i @*MongoDB@} custom objects), they will be recognized as such (with @*extended syntax@, if applying);
 - It will create a @80@ instance if the stored TEXT is a JSON object or array;
 - It will create a numerical value ({\f1\fs20 integer} or {\f1\fs20 @*double@}) if the stored text has the corresponding layout;
 - Otherwise, it will create a {\f1\fs20 string} value.
@@ -6189,7 +6189,7 @@ It gives access to any @**BSON@ data, including documents, arrays, and {\i Mongo
 - Fast in-place parsing of the BSON stream, without any memory allocation (via {\f1\fs20 TBSONElement});
 - A {\f1\fs20 @*TBSONVariant@} custom variant type, to store {\i MongoDB}'s custom type values;
 - Interaction with the {\f1\fs20 SynCommons.pas}' @80@ as document storage and late-binding access;
-- Marshalling BSON to and from @*JSON@, with the {\i MongoDB} extended syntax for handling its custom types.
+- Marshalling BSON to and from @*JSON@, with the {\i MongoDB} @*extended syntax@ for handling its custom types.
 This unit defines some objects able to connect and manage databases and collections of documents on any {\i MongoDB} servers farm:
 - Connection to one or several servers, including secondary hosts, via the {\f1\fs20 TMongoClient} class;
 - Access to any database instance, via the {\f1\fs20 TMongoDatabase} class;
@@ -6758,8 +6758,13 @@ Usage of this layout, instead of other like XML or any proprietary format, resul
 - The JSON format is simple, and specified in a short and clean RFC document;
 - The default text encoding for both JSON and {\i @*SQLite3@} is UTF-8, which allows the full Unicode char-set to be stored and communicated;
 - It is the default data format used by ASP.NET AJAX services created in Windows Communication Foundation (WCF) since .NET framework 3.5; so it's Microsoft officially "ready";
-- For binary @*BLOB@ transmission, we simply encode the binary data as {\i @*Base64@}; please note that, by default, BLOB fields are not transmitted with other fields in JSON objects, see @1@ (only exception are {\i @*dynamic array@} fields, which are transmittest within the other fields).
-JSON @**serialization@ will indeed be used in our main @*ORM@ to process of any {\f1\fs20 TSQLRecord} published properties, and in the {\f1\fs20 interface}-based @*SOA@ architecture of the framework, for content transmission.
+- For binary @*BLOB@ transmission, we simply encode the binary data as {\i @*Base64@}; please note that, by default, BLOB fields are not transmitted over REST with other fields in JSON objects, see @1@ (only exception are {\i @*dynamic array@} fields, which are transmittest within the other fields).
+REST JSON @**serialization@ will indeed be used in our main @*ORM@ to process of any {\f1\fs20 TSQLRecord} published properties, and in the {\f1\fs20 interface}-based @*SOA@ architecture of the framework, for content transmission.
+In the framework, the whole @http://json.org standard is implemented, with some exceptions/extensions:
+- {\f1\fs20 #0} characters will indicate the end of input, as with almost all JSON libraries - so if your text input contains a {\f1\fs20 #0} char, please handle it as binary (note that other control chars are escaped as expected);
+- You may use an "@**extended syntax@" (used e.g. by {\f1\fs20 @*MongoDB@}) by unquoting ASCII-only property names;
+- Floating point numbers are sometimes limited to {\f1\fs20 @*currency@} (i.e. 4 decimals), to ensure serialization/unserialization won't loose precision; but in such cases, it can be extended to the {\f1\fs20 double} precision via a set of options;
+- There is no @*53-bit@ limitation for integers, as with @*JavaScript@: the framework handle 64-bit integer values - when using a JavaScript back-end, you may have to transmit huge values as text.
 In practice, JSON has been found out to be very easy to work with and stable. A binary format is not used for transmission yet, but is available at other level of the framework, e.g. as an possible file format for in-memory {\f1\fs20 TObjectList} database engine (with our @*SynLZ@ compression - see @20@).
 :  Values serialization
 Standard {\i Delphi} value types are serialized directly within the JSON content, in their textual representation. For instance, {\f1\fs20 integer} or {\f1\fs20 Int64} are stored as numbers, and {\f1\fs20 @*double@} values are stored as their corresponding floating-point representation.
@@ -7082,6 +7087,7 @@ Classes with {\f1\fs20 published} properties, i.e. every class inheriting from {
 List of {\i Delphi} strings, i.e. {\f1\fs20 @*TStrings@} kind of classes will be serialized as a JSON array of strings. This is the reason why we also introduced a dedicated {\f1\fs20 @**TRawUTF8List@} class, for direct @*UTF-8@ content storage, via our dedicated {\f1\fs20 RawUTF8} type, reducing the need of encoding conversion, therefore increasing process speed.
 :52  TObject serialization
 In fact, any {\f1\fs20 @*TObject@} can be serialized as @*JSON@ in the whole framework: not only for the ORM part (for {\f1\fs20 published} properties), but also for SOA (as parameters of interface-based service methods). All JSON @**serialization@ is centralized in {\f1\fs20 ObjectToJSON()} and {\f1\fs20 JSONToObject()} (aka {\f1\fs20 TJSONSerializer.WriteObject}) functions.
+:   Custom class serialization
 In some cases, it may be handy to have a custom serialization, for instance if you want to manage some third-party classes, or to adapt the serialization scheme to a particular purpose, at runtime.
 You can add a customized serialization of any {\f1\fs20 class}, by calling the {\f1\fs20 TJSONSerializer. @**RegisterCustomSerializer@} class method. Two callbacks are to be defined for a specific class type, and will be used to serialize or un-serialize the object instance. The callbacks are class methods ({\f1\fs20 procedure() of object}), and not plain functions (for some evolved objects, it may have sense to use a context during serialization).
 In the current implementation of this feature, callbacks expect low-level implementation. That is, their implementation code shall follow function {\f1\fs20 JSONToObject()} patterns, i.e. calling low-level {\f1\fs20 GetJSONField()} function to decode the JSON content, and follow function {\f1\fs20 TJSONSerializer.WriteObject()} patterns, i.e. {\f1\fs20 aSerializer.Add/AddInstanceName/AddJSONEscapeString} to encode the class instance as JSON.
@@ -7143,7 +7149,48 @@ If you want to disable the custom serialization, you may call the same method as
 !  TJSONSerializer.RegisterCustomSerializer(TFileVersion,nil,nil);
 This will reset the JSON serialization of the specified class to the default serializer (i.e. writing of {\f1\fs20 published} properties).
 The above code uses some low-level functions of the framework (i.e. {\f1\fs20 AddJSONEscape} and {\f1\fs20 JSONDecode}) to implement serialization as a JSON object, but you may use any other serialization scheme, on need. That is, you may serialize the whole class instance just as one JSON string or numerical value, or even a JSON array. It will depend of the implementation of the {\i Reader} and {\i Writer} registered callbacks.
-:71  TObjectList serialization
+:   Custom field names serialization
+If your customization just expect changing some property names, you may use {\f1\fs20 TJSONSerializer.RegisterCustomSerializerFieldNames} class method.
+For instance, given the following class:
+!type
+!  TMyClass = class(TSynPersistent)
+!  private
+!    FLength: Integer;
+!    FColor: Integer;
+!    FName: RawUTF8;
+!  published
+!    property Color: Integer read FColor write FColor;
+!    property Length: Integer read FLength write FLength;
+!    property Name: RawUTF8 read FName write FName;
+!  end;
+You may use default serialization as such:
+!var
+!  O: TMyClass;
+!  json: RawUTF8;
+!begin
+!  O := TMyClass.Create;
+!  O.Color := 10;
+!  O.Length := 20;
+!  O.Name := 'one';
+!  json := ObjectToJSON(O);
+!  writeln(json); // {"Color":10,"Length":20,"Name":"one"}
+Then switch to customized serialization:
+!  TJSONSerializer.RegisterCustomSerializerFieldNames(TMyClass, ['name','length'], ['n','len']);
+!  json := ObjectToJSON(O);
+!  writeln(json); // {"Color":10,"len":20,"n":"one"}
+And back to normal/default serialization:
+!  TJSONSerializer.RegisterCustomSerializerFieldNames(TMyClass, [], []);
+!  json := ObjectToJSON(O);
+!  writeln(json); // {"Color":10,"Length":20,"Name":"one"}
+You could ignore some fields, by setting the destination name to {\f1\fs20 ''}:
+!  TJSONSerializer.RegisterCustomSerializerFieldNames(TMyClass, ['length'], ['']);
+!  json := ObjectToJSON(O);
+!  writeln(json); // {"Color":10,"Name":"one"}
+!  O.Free;
+!end;
+This method may therefore help working with pre-existing JSON objects, for instance retrieved from a third-party @*REST@ server.
+Note that the {\f1\fs20 TJSONSerializer.RegisterCustomSerializerFieldNames} method won't accept {\f1\fs20 TSQLRecord} classes, since {\f1\fs20 ORM} serialization is handled in its own (optimized) set - and you could use ORM-level mapping if needed - see @120@.
+:71   TObjectList serialization
 You can even serialize {\f1\fs20 @**TObjectList@} instances as a valid JSON array, with the ability to store each instance class name, so allowing the storage of non uniformous lists of objects.\line Calling {\f1\fs20 TJSONSerializer.RegisterClassForJSON()} is just needed to register each {\f1\fs20 TObject} class in its internal tables, and be able to create instances from a {\f1\fs20 class} name serialized in each JSON object.
 In fact, if {\f1\fs20 ObjectToJSON()} or {\f1\fs20 TJSONWriter.WriteObject()} have their {\f1\fs20 woStoreClassName} option defined, a new {\f1\fs20 "ClassName":} field will be written as first field of the serialized JSON object.
 This new {\f1\fs20 "ClassName"} field will be recognized:
@@ -7164,7 +7211,7 @@ As a consequence, this kind of code can now work:
 !CheckSame(Comp.Imaginary,7.92);
 !// do not forget to free the memory (Comp can be nill if JSON was not valid)
 !Comp.Free;
-Internal {\f1\fs20 TObjectList} process will therefore rely on a similar process, creating the proper class instances on the fly. You can even have several classes appearing in one {\f1\fs20 TObjectList}: the only prerequisite is that all class types shall have been previously registered on both sides, by a call to {\f1\fs20 TJSONSerializer. RegisterClassForJSON()}.
+Internal {\f1\fs20 TObjectList} process will therefore rely on a similar process, creating the proper class instances on the fly. You can even have several classes appearing in one {\f1\fs20 TObjectList}: the only prerequisite is that all class types shall have been previously registered on both sides, by a call to {\f1\fs20 TJSONSerializer.RegisterClassForJSON()}.
 \page
 :9 REST
 :  What is REST?
@@ -9537,7 +9584,7 @@ If you compare with existing mocking frameworks, even in other languages / platf
 - Most common parameters and results can be defined as simple {\f1\fs20 array of const} in the {\i Delphi} code, or by supplying JSON arrays (needed e.g. for more complex structures like {\f1\fs20 record} values);
 - Execution trace retrieval in easy to read or write text format (and not via complex "fluent" interface e.g. with {\f1\fs20 When} clauses);
 - Auto-release of the {\f1\fs20 TInterfaceStub TInterfaceMock TInterfaceMockSpy} generator instance, when the interface is no longer required, to minimize the code to type, and avoid potential memory leaks;
-- Works from {\i Delphi} 6 up to {\i Delphi 10.1 Berlin} - since no use of syntax sugar like generics, nor the {\f1\fs20 RTTI.pas} features;
+- Works from {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo} - since no use of syntax sugar like generics, nor the {\f1\fs20 RTTI.pas} features;
 - Very good performance (the faster {\i Delphi} mocking framework, for sure), due to very low overhead and its reuse of {\i mORMot}'s low-level interface-based services kernel using JSON serialization, which does not rely on the slow and limited {\f1\fs20 TVirtualInterface}.
 :  Stubbing complex return values
 Just imagine that the {\f1\fs20 ForgotMyPassword} method does perform an internal test:
@@ -9750,7 +9797,7 @@ Here are the key features of the current implementation of services using interf
 |Server factory|You can get an implementation on the server side
 |Client factory|You can get a "fake" implementation on the client side, remotely calling the server to execute the process
 |Cross-platform clients|A {\i mORMot} server is able to generate cross-platform client code via a set of templates - see @86@
-|Auto marshalling|The contract is transparently implemented: no additional code is needed e.g. on the client side, and will handle simple types (strings, numbers, dates, sets and enumerations) and high-level types (objects, collections, records, dynamic arrays, variants) from {\i Delphi} 6 up to {\i Delphi 10.1 Berlin}
+|Auto marshalling|The contract is transparently implemented: no additional code is needed e.g. on the client side, and will handle simple types (strings, numbers, dates, sets and enumerations) and high-level types (objects, collections, records, dynamic arrays, variants) from {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo}
 |Flexible|Methods accept per-value or per-reference parameters
 |Instance lifetime|An implementation class can be:\line - Created on every call,\line - Shared among all calls,\line - Shared for a particular user or group,\line - Dedicated to the thread it runs on,\line - Alive as long as the client-side interface is not released,\line - Or as long as an @*authentication@ session exists
 |@*Stateless@|Following a standard request/reply pattern
@@ -12524,7 +12571,7 @@ If you want to supply the context data as JSON, then render it, you may write:
 !    'Hello {{value.name}}'#13#10'You have just won {{value.value}} dollars!');
 !  html := mustache.RenderJSON('{value:{name:"Chris",value:10000}}');
 !  // now html='Hello Chris'#13#10'You have just won 10000 dollars!'
-Note that here, the JSON is supplied with an extended syntax (i.e. field names are unquoted), and that {\f1\fs20 TSynMustache} is able to identify a dotted-named variable within the execution context.
+Note that here, the JSON is supplied with an @*extended syntax@ (i.e. field names are unquoted), and that {\f1\fs20 TSynMustache} is able to identify a dotted-named variable within the execution context.
 As an alternative, you could use the following syntax to create the data context as JSON, with a set of parameters, therefore easier to work with in real code storing data in variables (for instance, any {\f1\fs20 string} variable is quoted as expected by JSON, and converted into @*UTF-8@):
 !  mustache := TSynMustache.Parse(
 !    'Hello {{name}}'#13#10'You have just won {{value}} dollars!');
@@ -13124,7 +13171,7 @@ $    }
 $  }
 $}
 Here, the {\f1\fs20 session} object will contain the {\f1\fs20 TCookieData} information, ready to be processed by the {\i Mustache View} - e.g. as {\f1\fs20 session.AuthorName}. In addition, your view may include some buttons for logged-only features, like comments or content edition, using {\f1\fs20 boolean} fields defined in {\f1\fs20 session.AuthorRights}.
-For security reasons, before actually performing an action requiring a specific right, it is preferred to check from the Model if the user is effectively allowed. An attacker may have forged a fake cookie - even if it is very unlikely, since cookies are encrypted and signed. It is a good approach to treat all cookies information as an unsafe cache, acceptable for most operation, but which should always be dual checked.\line So your server code will call {\f1\fs20 CurrentSession.CheckAndRetrieve} then access the data {\f1\fs20 RestModel} for verification before any sensitive action is performed. Defining a common method could be handy:
+For security reasons, before actually performing an action requiring a specific right, it is preferred to check from the Model if the user is effectively allowed. An attacker may have forged a fake cookie - even if it is very unlikely, since cookies are encrypted and signed. It is a good approach to treat all cookies information as an unsafe cache, acceptable for most operation, but which should always be dual-checked.\line So your server code will call {\f1\fs20 CurrentSession.CheckAndRetrieve} then access the data {\f1\fs20 RestModel} for verification before any sensitive action is performed. Defining a common method could be handy:
 !function TBlogApplication.GetLoggedAuthorID(Right: TSQLAuthorRight;
 !  ContentToFillAuthor: TSQLContent): TID;
 !var SessionInfo: TCookieData;
@@ -14714,6 +14761,132 @@ As reference, here is how the encryption is implemented in the {\f1\fs20 ECC} to
 !  end;
 !end;
 You may note here the use of {\f1\fs20 FillZero()} in the {\f1\fs20 finally} block of the function, which is a common - and strongly encouraged - way of protecting your sensitive data from remaining in RAM, after use. Both {\f1\fs20 SynCrypto.pas} and {\f1\fs20 SynEcc.pas} code has been checked to follow similar safety patterns, and not leave any sensitive information in the program stack or heap.
+:193 Application Locking
+A common feature request for professional software is to prevent abuse of published applications. For licensing or security reasons, you may be requested to "lock" the execution of programs, maybe tools or services.
+{\i mORMot} can use @*Asymmetric@ Cryptography to ensure that only allowed users could run some executables, optionally with dedicated settings, on a given computer. The framework offers the first brick, on which you should build upon your dedicated system.
+The {\f1\fs20 dddInfraApps.pas} unit publishes the following {\f1\fs20 @*ECCAuthorize@} function and type:
+!type
+!  TECCAuthorize = (eaSuccess, eaInvalidSecret, eaMissingUnlockFile,
+!    eaInvalidUnlockFile, eaInvalidJson);
+!
+!function ECCAuthorize(aContent: TObject; aSecretDays: integer; const aSecretPass,
+!  aDPAPI, aDecryptSalt, aAppLockPublic64: RawUTF8; const aSearchFolder: TFileName = '';
+!  aSecretInfo: PECCCertificateSigned = nil; aLocalFile: PFileName = nil): TECCAuthorize;
+This function will use several asymmetric key sets:
+- A {\i main key set}, named e.g. {\f1\fs20 applock.public} and {\f1\fs20 applock.private}, shared for all users of the system;
+- Several {\i user-specific key sets}, named e.g. {\f1\fs20 user@host.public} and {\f1\fs20 user@host.secret}, one for each {\f1\fs20 user} and associated computer {\f1\fs20 host} name.
+When the {\f1\fs20 ECCAuthorize} function is executed, it will search for a local {\f1\fs20 user@host.unlock} file, named after the current logged user and the computer host name. Of course, the first time the application is launched for this user, there will be no such file. It will create two local {\f1\fs20 user@host.public} and {\f1\fs20 user@host.secret} files and return {\f1\fs20 eaMissingUnlockFile}.
+The {\i main key set} will be used to digitally {\i sign} the {\f1\fs20 unlock} file:
+- {\f1\fs20 applock.public} will be supplied as plain base64-encoded {\f1\fs20 aAppLockPublic64} text parameter in the executables - for safety, you should ensure its value is note replaced by a forged one by an attacker: the executable should be signed, or at least the constant value should be checked with a CRC for its content during the program execution;
+- On the contrary, {\f1\fs20 applock.private} will be kept secret - with its associated secret password.
+{\i User-specific key sets} will be used to {\i encrypt} the {\f1\fs20 unlock} file:
+- The {\f1\fs20 user@host.secret} file contains in fact a genuine private key, encrypted using {\f1\fs20 CryptDataForCurrentUser} (i.e. {\f1\fs20 DPAPI} under {\i Windows}) for the specific computer and user: this will avoid {\f1\fs20 user@host.unlock} reuse on another computer, even if the user and host names are identical, and the {\f1\fs20 user@host.secret} file is copied. This file should remain local, and doesn't need to be transmitted.
+- The {\f1\fs20 user@host.public} file will be sent to the product support team, e.g. by email - but you may setup an automated server, if needed. The support team will create a {\f1\fs20 user@host.unlock} matching this {\f1\fs20 user@host.public} key, which will unlock the application for the given user.
+On the support team side, a {\f1\fs20 user@host.json} file is created for the given user, and will contain the @*JSON@ serialization of the {\f1\fs20 aContent: TObject} parameter of the {\f1\fs20 ECCAuthorize} function. This object may contain any published properties, matching the security expectations for this user, e.g. the available features or resource access.
+:  From the User perspective
+The resulting process is therefore the following:
+\graph ECCAuthorizeWorkflow1 Application Unlocking via Asymmetric Cryptography
+subgraph cluster_0 {
+label="PC1 Computer";
+\Application\user1@pc1.secret
+\Application\user1@pc1.public
+\Application\user1@pc1.unlock
+\Application\applock.public
+}
+subgraph cluster_3 {
+label="Support Team";
+\user1@pc1.public\ user1@pc1.public\email
+\user1@pc1.json\ user1@pc1.unlock\encrypt
+\applock.private\ user1@pc1.unlock\sign
+\ user1@pc1.public\ user1@pc1.unlock
+\ user1@pc1.unlock\user1@pc1.unlock\email
+}
+\
+In short, every user/computer combination will have its own set of {\f1\fs20 public/secret/unlock} files.
+- In practice, {\f1\fs20 applock.public} could be hardcoded as plain base64-encoded {\f1\fs20 aAppLockPublic64} constant {\f1\fs20 string} in the Application code - of course, the executable should be signed with a proper authority, to ensure this constant is not replaced by a fake value;
+- The location of those local {\f1\fs20 user@host.*} files is by default the executable folder, but may be specified via the {\f1\fs20 aSearchFolder} parameter - especially if this folder is read-only (e.g. due to Windows UAC), or if you use some custom GUI for the user interactivity;
+- The {\f1\fs20 user@host.json} will be signed using {\f1\fs20 applock.private} secret key, to testify that the resulting {\f1\fs20 user@host.unlock} file was indeed provided by the Support Team;
+- The {\f1\fs20 user@host.json} will be encrypted using the {\f1\fs20 user@host.public} key received by email, so will be specific to a single user/computer combination.
+If two users share the application on the very same computer, another set of files will appear:
+\graph ECCAuthorizeWorkflow2 Application Unlocking on Two Computers
+subgraph cluster_0 {
+label="PC1 Computer";
+\Application\user1@pc1.secret
+\Application\user1@pc1.public
+\Application\user1@pc1.unlock
+\Application\applock.public
+}
+subgraph cluster_1 {
+label="PC2 Computer";
+\ Application\user2@pc2.secret
+\ Application\user2@pc2.public
+\ Application\user2@pc2.unlock
+\ Application\ applock.public
+}
+subgraph cluster_3 {
+label="Support Team";
+\user1@pc1.public\ user1@pc1.public\email
+\ user1@pc1.public\ user1@pc1.unlock\encrypt
+\user1@pc1.json\ user1@pc1.unlock
+\applock.private\ user1@pc1.unlock\sign
+\user2@pc2.public\ user2@pc2.public\email
+\user2@pc2.json\ user2@pc2.unlock\encrypt
+\applock.private\ user2@pc2.unlock\sign
+\ user1@pc1.unlock\user1@pc1.unlock\email
+\ user2@pc2.public\ user2@pc2.unlock
+\ user2@pc2.unlock\user2@pc2.unlock\email
+}
+\
+Several users on the same computer will be handled as such:
+\graph ECCAuthorizeWorkflow3 Application Unlocking for Two Users
+subgraph cluster_0 {
+label="PC1 Computer";
+\Application\applock.public
+\Application\user2@pc1.public
+\Application\user2@pc1.unlock
+\Application\user2@pc1.secret
+\Application\user1@pc1.public
+\Application\user1@pc1.unlock
+\Application\user1@pc1.secret
+}
+subgraph cluster_3 {
+label="Support Team";
+\user1@pc1.json\ user1@pc1.unlock\encrypt
+\user1@pc1.public\ user1@pc1.public\email
+\ user1@pc1.public\ user1@pc1.unlock
+\ user1@pc1.unlock\user1@pc1.unlock\email
+\applock.private\ user1@pc1.unlock\sign
+\user2@pc1.json\ user2@pc1.unlock
+\user2@pc1.public\ user2@pc1.public\email
+\ user2@pc1.public\ user2@pc1.unlock\encrypt
+\ user2@pc1.unlock\user2@pc1.unlock
+\applock.private\ user2@pc1.unlock\sign
+}
+\
+From the User point of view, he/she will transmit its {\f1\fs20 user@host.public} file, then receives a corresponding {\f1\fs20 user@host.unlock} file, which will unlock the application. Pretty easy to understand - even if some complex asymmetric encryption is involved behind the scene.
+:  From the Support Team perspective
+The Support Team will maintain a list of {\f1\fs20 user@host.public} and {\f1\fs20 user@host.json} files, one per user/computer. Both files have small JSON content, so may be stored in a dedicated folder of the project source code repository - or in a dedicated repository. The use of a source code repository allows to track user management information between several support people, including history and audit trail of this sensitive information. For safety, the {\f1\fs20 applock.private} file may not be archived in the source code repository, but copied on purpose on each support people's (or developer's) computer. A separated, and dedicated computer, may be used, for additional safety.
+In fact, even developers may define their own set of {\f1\fs20 .unlock} files. For local test builds, they may use their own {\f1\fs20 applock.public} and {\f1\fs20 applock.private} key pairs, diverse from the main content.
+The content of each {\f1\fs20 user@host.json} may be easily derivated from a set of reference {\f1\fs20 .json} files, acting like templates of group of users. Or an existing file may be used as source for a new user. The ability to use JSON and a text editor, with customizable object and arrays fields, allows any needed kind of licensing or security scope, depending on the application.\line Since the {\f1\fs20 user@host.json} is a serialized {\f1\fs20 aContent: TObject}, you can define enumerates properties, or even schema-less structures as {\f1\fs20 @*TDocVariant@} - see @80@ - to refine the authorization scope.
+The {\f1\fs20 user@host.json} file is encrypted using the genuine {\f1\fs20 user@host.public} key, and its associated {\f1\fs20 user@host.secret} is strongly encrypted for the given PC and logged user: therefore, only the application is able to decipher the {\f1\fs20 user@host.unlock} content. You can let those files be transmitted via an unsafe mean of transport, e.g. plain email, with no compromising risk. Last but not least, passwords or IP addresses can be safely stored in its content, as part of the security policy of your project.
+In practice, the team may use a {\f1\fs20 unlock.bat} file running the ECC tool over secret {\f1\fs20 applock.private} keys, containing the secret:
+$ @echo off
+$ echo Usage:  unlock user@host
+$ echo.
+$ ecc sign -file %1.json -auth applock -pass applockprivatepassword -rounds 60000
+$ ecc crypt -file %1.json -out %1.unlock -auth %1 -saltpass decryptsalt -saltrounds 10000
+$ del %1.json.sign
+For safety, you may not include the {\f1\fs20 -pass applockprivatepassword} value in this {\f1\fs20 unlock.bat} file. Removing this {\f1\fs20 -pass} command-line switch will let the {\f1\fs20 ecc} tool prompt for the password secret key on the console:
+$ ecc sign -file %1.json -auth applock -rounds 60000
+Also note that you can use the {\f1\fs20 ecc rekey} command to customize the password of a given {\f1\fs20 applock.private} file: each support team member may have his/her custom password to run the {\i sign-then-encrypt} process.
+Of course, if you need to create a lot of {\f1\fs20 .unlock} files, you may want to automate this process, e.g. in a server or a GUI tool, using {\f1\fs20 SynEcc.pas} classes.
+:  Benefits of Asymmetric Encryption for License management
+In most licensing systems, the weak point is the transmission of the licensing file. Thanks to Asymmetric Encryption, both {\f1\fs20 user@host.public} and {\f1\fs20 user@host.unlock} files can be transmitted as plain emails, without any possibility of compromising.
+The {\f1\fs20 applock.private} secret key and its associated password are used to digitally sign (using ECDSA) the plain content of the {\f1\fs20 user@host.unlock} file. This {\i sign-then-encrypt} pattern will ensure that only your support team will be able to generate the proper {\f1\fs20 .unlock} files for a given application. The {\f1\fs20 applock.private/public} keys could have their own deprecation date.
+As we have seen, the {\f1\fs20 user@host.unlock} file is encrypted, so you can use it to transmit sensitive information. Its associated {\f1\fs20 user@host.secret} key has been generated locally with an expiration date - see the {\f1\fs20 aSecretDays} parameter of the {\f1\fs20 ECCAuthorize} function. It will ensure that the registering process should be performed regularly, if the licensing or security policy expect it.
+Of course, any such system is as weak as its weakest point. In particular, under Windows the executable should be digitally signed (as any professional software). You could also ensure that the {\f1\fs20 aAppLockPublic64} public key has not been replaced by a fake value forged by an attacker - e.g. by checking its value by computing its CRC in several places of your application:
+! if crc32($1239438,pointer(AppLock64),length(AppLock64))<>$ae293c10 then Close;
+The security of this system does not rely on code obfuscation, but on proven safety of asymmetric encryption. Even if the executable is modified in-place to by-pass the license check, the fact that the application expects some additional information to be provided within the {\f1\fs20 user@host.unlock} file will make it much more difficult to hack.\line As always with Open Source, any feedback is welcome, in order to enhance the safety of this system. The fact that the code is available - so that the algorithms could be proven - make it safer than any proprietary solution developed in-door.
 :68Domain-Driven-Design
 %cartoon06.png
 We have now discovered how {\i mORMot} offers you some technical bricks to play with, but it is up to you to build the house (castle?), according to your customer needs.
@@ -15447,7 +15620,7 @@ And even better, testing-driven coding can be encouraged:
 It could sounds like a waste of time, but such coding improve your code quality a lot, and, at least, it help you write and optimize every implementation feature.
 The framework has been implemented using this approach, and provide all the tools to write tests. In addition to what other {\i Delphi} frameworks offer (e.g. {\i DUnit / DUnitX}), the {\f1\fs20 SynTests.pas} unit is very much integrated with other elements of the framework (like logging), is cross-platform and cross-compiler, and provides a complete {\i stubbing / mocking} mechanism to cover @62@.
 :  Involved classes in Unitary testing
-The @!TSynTest,TSynTestCase,TSynTests!Lib\SynTests.pas@ unit defines two classes (both inheriting from {\f1\fs20 TSynTest}), implementing a complete Unitary testing mechanism similar to {\i DUnit}, with less code overhead, and direct interface with the framework units and requirements (@*UTF-8@ ready, code compilation from {\i Delphi} 6 up to {\i Delphi 10.1 Berlin} and FPC, no external dependency).
+The @!TSynTest,TSynTestCase,TSynTests!Lib\SynTests.pas@ unit defines two classes (both inheriting from {\f1\fs20 TSynTest}), implementing a complete Unitary testing mechanism similar to {\i DUnit}, with less code overhead, and direct interface with the framework units and requirements (@*UTF-8@ ready, code compilation from {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo} and FPC, no external dependency).
 The following diagram defines this class hierarchy:
 \graph HierTSynTest TSynTest classes hierarchy
 \TSynTests\TSynTest
@@ -15565,6 +15738,7 @@ Before any release all unitary regression tests are performed with the following
 - {\i Delphi} XE7;
 - {\i Delphi} 10 Seattle;
 - {\i Delphi} 10.1 Berlin;
+- {\i Delphi} 10.2 Tokyo;
 - {\i @*CrossKylix@} 3.0;
 - {\i @*FPC@} 3.x.x / 3.1.1 (svn revision).
 Target platforms are {\i Win32} and {\i Win64} for {\i Delphi} and {\i FPC}, plus {\i Linux 32/64} for {\i FPC} and {\i CrossKylix}.
@@ -15590,7 +15764,8 @@ Here are some of its features:
 - Integrated log archival (in {\f1\fs20 .zip} or any other format, including our {\f1\fs20 .synlz});
 - Optional colored echo to a console window, for interactive debugging;
 - Fast log viewer tool available, including thread filtering and customer-side execution profiling;
-- Optional remote logging via HTTP - the log viewer can be used as server.
+- Optional remote logging via HTTP - the log viewer can be used as server;
+- Optional events transmission to a UDP {\f1\fs20 syslog} server.
 :  Setup logging
 Logging is defined mainly by a per-class approach. You usually define your logging expectations by using a {\f1\fs20 TSynLog} class, and setting its {\f1\fs20 Family} property. Note that it is perfectly feasible to use you own {\f1\fs20 TSynLog} class instance, with its own {\f1\fs20 TSynLog} family settings, injected at the {\f1\fs20 constructor} level; but in {\i mORMot}, we usually use the per-class approach, via {\f1\fs20 TSynLog}, {\f1\fs20 TSQLLog}, {\f1\fs20 SynDBLog} and {\f1\fs20 SQLite3Log} - see @73@.
 For sample code (and the associated log viewer tool), see "{\i 11 - Exception logging}" folder in "{\i Sqlite3\\Samples}".
@@ -15931,7 +16106,7 @@ Follow these steps:
 - Finally, click on the "{\i Zip Archive}" link, available at the end of the "{\i Overview}" header, right ahead to the "{\i Other Links}" title. This link will build a {\f1\fs20 .zip} archive of the complete source code and download it to your browser.
 :  Expected compilation platform
 The framework source code tree will compile and is tested for the following platforms:
-- {\i Delphi} 6 up to {\i Delphi 10.1 Berlin} compiler and IDE, with @*FPC@ 2.7.1 / 3.1.1 support;
+- {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo} compiler and IDE, with @*FPC@ 2.7.1 / 3.1.1 support;
 - Server side on Windows 32-bit and @**64-bit@ platforms ({\i Delphi} XE2 and up is expected when targeting {\i Win64});
 - Preliminary {\i @*Linux@} platform for @*ORM@ servers using the FPC compiler - less stable and tested in production than the Windows port;
 - VCL client on Win32/Win64 - GUI may be compiled optionally with third-party non Open-Source @*TMS@ Components, instead of default VCL components - see @http://www.tmssoftware.com/site/tmspack.asp
@@ -16499,7 +16674,7 @@ The {\i Office UI licensing program} was designed by {\i Microsoft} for software
 If you want to design your user interface using a Office 2007/2010 ribbon look, please take a look at those official guidelines: @http://msdn.microsoft.com/en-us/library/cc872782.aspx
 Here is the screen content, using the TMS components:
 %synfiletms.png
-And here is the same application compiled using only VCL components, available from {\i Delphi} 6 up to {\i Delphi 10.1 Berlin}:
+And here is the same application compiled using only VCL components, available from {\i Delphi} 6 up to {\i Delphi 10.2 Tokyo}:
 %synfilevcl.png
 We did not use yet the Ribbon component as was introduced in {\i Delphi} 2009. Its action-driven design won't make it easy to interface with the event-driven design of our User Interface handling, and we have to confess that this component has rather bad reputation (at least in the {\i Delphi} 2009 version). Feel free to adapt our Open Source code to use it - we'll be very pleased to release a new version supporting it, but we don't have time nor necessity to do it by ourself.
 :  Enumeration types

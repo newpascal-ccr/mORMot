@@ -1,7 +1,7 @@
 /// ViewModel/Control interfaces for the MVCServer BLOG sample
 unit MVCViewModel;
 
-{$I Synopse.inc} // define HASINLINE WITHLOG USETHREADPOOL ONLYUSEHTTPSOCKET
+{$I Synopse.inc} // define HASINLINE WITHLOG ONLYUSEHTTPSOCKET
 
 interface
 
@@ -462,12 +462,11 @@ begin
   end;
 end;
 
-{$ifndef ISDELPHI2010}
-
-
 initialization
+  {$ifndef DELPHI2010}
+  // manual definition mandatory only if Delphi 2010 RTTI is not available
   TTextWriter.RegisterCustomJSONSerializerFromTextSimpleType(TypeInfo(TSQLAuthorRights));
   TTextWriter.RegisterCustomJSONSerializerFromText(TypeInfo(TCookieData),
     'AuthorName RawUTF8 AuthorID cardinal AuthorRights TSQLAuthorRights');
-{$endif}
+  {$endif}
 end.
